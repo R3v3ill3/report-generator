@@ -26,10 +26,9 @@ export const formatFullReport = async (campaignData: CampaignData): Promise<Form
   // Add executive summary if available
   if (campaignData.executiveSummary) {
     console.log('Processing executive summary');
-    const formattedSummary = await formatSection(campaignData.executiveSummary);
     sections.push({
       title: 'Executive Summary',
-      content: formattedSummary,
+      content: campaignData.executiveSummary,
       level: 1
     });
   }
@@ -86,8 +85,8 @@ export const formatFullReport = async (campaignData: CampaignData): Promise<Form
     extractedTables.forEach((table, key) => tables.set(key, table));
   }
 
-  console.log('Formatted sections:', sections);
-  console.log('Extracted tables:', tables);
+  console.log('Formatted sections:', sections.map(s => ({ title: s.title, contentLength: s.content.length })));
+  console.log('Number of tables:', tables.size);
 
   return {
     title: getReportTitle(campaignData),
@@ -103,25 +102,6 @@ const getReportTitle = (campaignData: CampaignData): string => {
   return 'Campaign Report';
 };
 
-const formatSection = async (content: string): Promise<string> => {
-  if (!content) return '';
-  
-  // Remove any existing markdown formatting while preserving content structure
-  let formatted = content
-    .replace(/#{1,6}\s/g, '') // Remove heading markers
-    .replace(/\*\*/g, '')     // Remove bold markers
-    .replace(/\n{3,}/g, '\n\n') // Normalize line breaks
-    .trim();
-
-  // Split into paragraphs and format each
-  const paragraphs = formatted.split('\n\n');
-  const formattedParagraphs = paragraphs
-    .map(p => p.trim())
-    .filter(p => p.length > 0);
-
-  return formattedParagraphs.join('\n\n');
-};
-
 const processContent = async (
   content: string,
   sectionPrefix: string
@@ -133,10 +113,10 @@ const processContent = async (
   const tables = new Map<string, TableData>();
   let tableCounter = 1;
   let formattedContent = '';
-  let currentTable: TableData | null = null;
   let tableLines: string[] = [];
+  let inTable = false;
   
-  // Split content into lines
+  // Split content into lines while preserving paragraphs
   const lines = content.split('\n');
   let currentParagraph = '';
   
@@ -144,15 +124,18 @@ const processContent = async (
     const line = lines[i].trim();
     
     if (line.startsWith('|')) {
-      // If we have any pending paragraph content, add it
-      if (currentParagraph) {
-        formattedContent += currentParagraph.trim() + '\n\n';
-        currentParagraph = '';
+      // We're entering a table
+      if (!inTable) {
+        // If we have pending paragraph content, add it
+        if (currentParagraph) {
+          formattedContent += currentParagraph.trim() + '\n\n';
+          currentParagraph = '';
+        }
+        inTable = true;
       }
-      
       tableLines.push(line);
       
-      // If next line doesn't start with |, process the table
+      // Check if this is the end of the table
       if (!lines[i + 1]?.trim().startsWith('|')) {
         const table = processTable(tableLines);
         if (table) {
@@ -161,10 +144,12 @@ const processContent = async (
           formattedContent += `[TABLE:${tableId}]\n\n`;
         }
         tableLines = [];
+        inTable = false;
       }
     } else {
-      // If we were collecting table lines, process the table
-      if (tableLines.length > 0) {
+      // Not in a table
+      if (inTable) {
+        // Process any pending table
         const table = processTable(tableLines);
         if (table) {
           const tableId = `${sectionPrefix}_table_${tableCounter++}`;
@@ -172,12 +157,25 @@ const processContent = async (
           formattedContent += `[TABLE:${tableId}]\n\n`;
         }
         tableLines = [];
+        inTable = false;
       }
       
       // Handle regular content
       if (line) {
-        currentParagraph += (currentParagraph ? ' ' : '') + line;
+        // If this is a header (starts with #), add it as a new paragraph
+        if (line.startsWith('#')) {
+          if (currentParagraph) {
+            formattedContent += currentParagraph.trim() + '\n\n';
+            currentParagraph = '';
+          }
+          // Remove the # and add as a paragraph
+          formattedContent += line.replace(/^#+\s*/, '').trim() + '\n\n';
+        } else {
+          // Regular text - add to current paragraph
+          currentParagraph += (currentParagraph ? ' ' : '') + line;
+        }
       } else if (currentParagraph) {
+        // Empty line - end the current paragraph
         formattedContent += currentParagraph.trim() + '\n\n';
         currentParagraph = '';
       }
@@ -207,19 +205,21 @@ const processContent = async (
 const processTable = (tableLines: string[]): TableData | null => {
   if (tableLines.length < 3) return null; // Need at least header, separator, and one data row
   
+  // Process headers - remove leading/trailing |
   const headers = tableLines[0]
+    .replace(/^\||\|$/g, '')
     .split('|')
-    .filter(cell => cell.trim())
     .map(cell => cell.trim());
   
-  const rows = tableLines.slice(2) // Skip header and separator
-    .filter(line => line.includes('|'))
+  // Skip the separator line and process data rows
+  const rows = tableLines.slice(2)
     .map(line => 
       line
+        .replace(/^\||\|$/g, '') // Remove leading/trailing |
         .split('|')
-        .filter(cell => cell.trim())
         .map(cell => cell.trim())
-    );
+    )
+    .filter(row => row.length === headers.length); // Ensure row matches headers
   
   if (headers.length === 0 || rows.length === 0) return null;
   
