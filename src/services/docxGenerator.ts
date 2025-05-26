@@ -1,5 +1,6 @@
-import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, BorderStyle, AlignmentType, TableOfContents, LevelFormat, convertInchesToTwip } from 'docx';
+import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, BorderStyle, AlignmentType, TableOfContents } from 'docx';
 import { CampaignData, ReportOptions } from '../contexts/CampaignContext';
+import { formatFullReport } from './reportFormatter';
 
 const STYLES = {
   heading1: {
@@ -36,46 +37,112 @@ export const generateDocx = async (
   try {
     console.log(`Generating ${reportType} DOCX report for campaign:`, campaignData.id);
     
-    const children = [
-      // Title
+    // Format the report content first
+    const formattedReport = await formatFullReport(campaignData);
+    
+    // Initialize document sections
+    const children: any[] = [];
+    const sections: { title: string; startPage: number }[] = [];
+    let currentPage = 1;
+    
+    // Add title
+    children.push(
       new Paragraph({
-        text: getReportTitle(reportType),
+        text: formattedReport.title,
         heading: HeadingLevel.HEADING_1,
         alignment: AlignmentType.CENTER,
         spacing: { after: 400 },
-      }),
-      
-      // Organization Info
-      ...getOrganizationInfoParagraphs(reportOptions.contactDetails),
-      
-      // Table of Contents
+      })
+    );
+    
+    // Add organization info
+    children.push(...getOrganizationInfoParagraphs(reportOptions.contactDetails));
+    
+    // Add table of contents placeholder
+    const tocStart = children.length;
+    children.push(
       new Paragraph({
         text: "Table of Contents",
         heading: HeadingLevel.HEADING_1,
         spacing: { before: 400, after: 200 },
-      }),
-      new TableOfContents("Table of Contents", {
-        hyperlink: true,
-        headingStyleRange: "1-3",
-        stylesWithLevels: [
-          { level: 0, styleId: "Heading1" },
-          { level: 1, styleId: "Heading2" },
-          { level: 2, styleId: "Heading3" },
-        ],
-      }),
-      new Paragraph({
-        children: [new TextRun({ break: 2 })],
-      }),
-    ];
+      })
+    );
     
-    // Executive Summary
-    if (campaignData.executiveSummary) {
-      children.push(...getExecutiveSummarySection(campaignData.executiveSummary));
+    // Process each section
+    for (const section of formattedReport.sections) {
+      // Skip sections not relevant to the report type
+      if (!shouldIncludeSection(section.title, reportType)) continue;
+      
+      // Track section start page
+      sections.push({
+        title: section.title,
+        startPage: currentPage
+      });
+      
+      // Add section title
+      children.push(
+        new Paragraph({
+          text: section.title,
+          heading: HeadingLevel.HEADING_1,
+          spacing: { before: 400, after: 200 },
+        })
+      );
+      
+      // Process section content
+      const contentParts = section.content.split(/\[TABLE:([^\]]+)\]/);
+      for (let i = 0; i < contentParts.length; i++) {
+        if (i % 2 === 0) {
+          // Regular content
+          if (contentParts[i].trim()) {
+            const paragraphs = contentParts[i].trim().split('\n\n');
+            for (const paragraph of paragraphs) {
+              children.push(
+                new Paragraph({
+                  children: [
+                    new TextRun({
+                      text: paragraph.trim(),
+                      ...STYLES.normalText,
+                    }),
+                  ],
+                  spacing: { after: 200 },
+                })
+              );
+            }
+          }
+        } else {
+          // Table reference
+          const tableId = contentParts[i];
+          const tableData = formattedReport.tables.get(tableId);
+          if (tableData) {
+            children.push(createTable(tableData.headers, tableData.rows));
+            children.push(
+              new Paragraph({
+                spacing: { after: 200 },
+              })
+            );
+          }
+        }
+        
+        // Update current page based on content
+        currentPage = Math.ceil(children.length / 40) + 1; // Approximate 40 elements per page
+      }
     }
     
-    // Report Content
-    children.push(...getReportContent(campaignData, reportType));
+    // Generate table of contents
+    const toc = new TableOfContents("Table of Contents", {
+      hyperlink: true,
+      headingStyleRange: "1-3",
+      stylesWithLevels: sections.map((section, index) => ({
+        level: 0,
+        styleId: `Heading${index + 1}`,
+        pageNumber: section.startPage
+      })),
+    });
     
+    // Insert TOC after placeholder
+    children.splice(tocStart + 1, 0, toc);
+    
+    // Create the document
     const doc = new Document({
       sections: [{
         properties: {},
@@ -175,201 +242,6 @@ const getOrganizationInfoParagraphs = (contactDetails: ReportOptions['contactDet
   return paragraphs;
 };
 
-const getExecutiveSummarySection = (executiveSummary: string) => {
-  return [
-    new Paragraph({
-      text: 'Executive Summary',
-      heading: HeadingLevel.HEADING_1,
-      spacing: { before: 400, after: 200 },
-    }),
-    new Paragraph({
-      children: [
-        new TextRun({
-          text: executiveSummary,
-          ...STYLES.normalText,
-        }),
-      ],
-      spacing: { after: 400 },
-    }),
-  ];
-};
-
-const getReportContent = (campaignData: CampaignData, reportType: 'combined' | 'messaging' | 'action') => {
-  const sections = [];
-  
-  if (reportType === 'combined' || reportType === 'messaging') {
-    if (campaignData.step1Analysis) {
-      sections.push(
-        new Paragraph({
-          text: 'Strategic Analysis',
-          heading: HeadingLevel.HEADING_1,
-          spacing: { before: 400, after: 200 },
-        })
-      );
-      
-      // Parse content for tables and text
-      const parts = campaignData.step1Analysis.split(/(?=\|)|(?<=\n)/);
-      let isInTable = false;
-      let tableData: string[][] = [];
-      let tableHeaders: string[] = [];
-
-      for (const part of parts) {
-        if (part.startsWith('|')) {
-          if (!isInTable) {
-            // Start new table
-            isInTable = true;
-            const headerRow = part.split('|').filter(cell => cell.trim());
-            tableHeaders = headerRow.map(header => header.trim());
-            tableData = [];
-          } else {
-            // Add table row
-            if (!part.includes('|-')) { // Skip separator row
-              const row = part.split('|').filter(cell => cell.trim());
-              tableData.push(row.map(cell => cell.trim()));
-            }
-          }
-        } else {
-          if (isInTable) {
-            // End table and add it
-            isInTable = false;
-            sections.push(createTable(tableHeaders, tableData));
-            sections.push(new Paragraph({ spacing: { after: 200 } }));
-            tableData = [];
-            tableHeaders = [];
-          }
-
-          // Regular text content
-          if (part.trim()) {
-            sections.push(
-              new Paragraph({
-                children: [
-                  new TextRun({
-                    text: part.trim(),
-                    ...STYLES.normalText,
-                  }),
-                ],
-                spacing: { after: 200 },
-              })
-            );
-          }
-        }
-      }
-    }
-    
-    if (campaignData.messagingGuide) {
-      sections.push(
-        new Paragraph({
-          text: 'Messaging Guide',
-          heading: HeadingLevel.HEADING_1,
-          spacing: { before: 400, after: 200 },
-        })
-      );
-      
-      // Parse messaging guide content similarly
-      const parts = campaignData.messagingGuide.split(/(?=\|)|(?<=\n)/);
-      let isInTable = false;
-      let tableData: string[][] = [];
-      let tableHeaders: string[] = [];
-
-      for (const part of parts) {
-        if (part.startsWith('|')) {
-          if (!isInTable) {
-            isInTable = true;
-            const headerRow = part.split('|').filter(cell => cell.trim());
-            tableHeaders = headerRow.map(header => header.trim());
-            tableData = [];
-          } else {
-            if (!part.includes('|-')) {
-              const row = part.split('|').filter(cell => cell.trim());
-              tableData.push(row.map(cell => cell.trim()));
-            }
-          }
-        } else {
-          if (isInTable) {
-            isInTable = false;
-            sections.push(createTable(tableHeaders, tableData));
-            sections.push(new Paragraph({ spacing: { after: 200 } }));
-            tableData = [];
-            tableHeaders = [];
-          }
-
-          if (part.trim()) {
-            sections.push(
-              new Paragraph({
-                children: [
-                  new TextRun({
-                    text: part.trim(),
-                    ...STYLES.normalText,
-                  }),
-                ],
-                spacing: { after: 200 },
-              })
-            );
-          }
-        }
-      }
-    }
-  }
-  
-  if (reportType === 'combined' || reportType === 'action') {
-    if (campaignData.actionPlan) {
-      sections.push(
-        new Paragraph({
-          text: 'Action Plan',
-          heading: HeadingLevel.HEADING_1,
-          spacing: { before: 400, after: 200 },
-        })
-      );
-      
-      // Parse action plan content similarly
-      const parts = campaignData.actionPlan.split(/(?=\|)|(?<=\n)/);
-      let isInTable = false;
-      let tableData: string[][] = [];
-      let tableHeaders: string[] = [];
-
-      for (const part of parts) {
-        if (part.startsWith('|')) {
-          if (!isInTable) {
-            isInTable = true;
-            const headerRow = part.split('|').filter(cell => cell.trim());
-            tableHeaders = headerRow.map(header => header.trim());
-            tableData = [];
-          } else {
-            if (!part.includes('|-')) {
-              const row = part.split('|').filter(cell => cell.trim());
-              tableData.push(row.map(cell => cell.trim()));
-            }
-          }
-        } else {
-          if (isInTable) {
-            isInTable = false;
-            sections.push(createTable(tableHeaders, tableData));
-            sections.push(new Paragraph({ spacing: { after: 200 } }));
-            tableData = [];
-            tableHeaders = [];
-          }
-
-          if (part.trim()) {
-            sections.push(
-              new Paragraph({
-                children: [
-                  new TextRun({
-                    text: part.trim(),
-                    ...STYLES.normalText,
-                  }),
-                ],
-                spacing: { after: 200 },
-              })
-            );
-          }
-        }
-      }
-    }
-  }
-  
-  return sections;
-};
-
 const createTable = (headers: string[], rows: string[][]) => {
   return new Table({
     width: {
@@ -411,14 +283,16 @@ const createTable = (headers: string[], rows: string[][]) => {
   });
 };
 
-const getReportTitle = (reportType: 'combined' | 'messaging' | 'action'): string => {
+const shouldIncludeSection = (sectionTitle: string, reportType: string): boolean => {
   switch (reportType) {
     case 'combined':
-      return 'Campaign Report';
+      return true;
     case 'messaging':
-      return 'Campaign Messaging Guide';
+      return ['Executive Summary', 'Strategic Analysis', 'Messaging Guide'].includes(sectionTitle);
     case 'action':
-      return 'Campaign Action Plan';
+      return ['Executive Summary', 'Action Plan'].includes(sectionTitle);
+    default:
+      return false;
   }
 };
 

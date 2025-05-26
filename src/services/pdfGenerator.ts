@@ -1,6 +1,7 @@
 import { CampaignData, ReportOptions } from '../contexts/CampaignContext';
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
+import { formatFullReport } from './reportFormatter';
 
 export const generatePdf = async (
   campaignData: CampaignData,
@@ -10,12 +11,19 @@ export const generatePdf = async (
   try {
     console.log(`Generating ${reportType} PDF report for campaign:`, campaignData.id);
     
+    // Format the report content first
+    const formattedReport = await formatFullReport(campaignData);
+    
     const doc = new jsPDF();
-    let yPos = 20;
     const pageWidth = doc.internal.pageSize.width;
     const pageHeight = doc.internal.pageSize.height;
     const margin = 20;
     const contentWidth = pageWidth - (margin * 2);
+    
+    // Track sections and their pages
+    const sections: { title: string; page: number }[] = [];
+    let currentPage = 1;
+    let yPos = margin;
     
     // Add logo if available
     if (reportOptions.logoDataUrl) {
@@ -26,8 +34,7 @@ export const generatePdf = async (
     // Add title
     doc.setFontSize(24);
     doc.setTextColor(43, 87, 151); // Blue color
-    const title = getReportTitle(reportType);
-    doc.text(title, pageWidth / 2, yPos, { align: 'center' });
+    doc.text(formattedReport.title, pageWidth / 2, yPos, { align: 'center' });
     yPos += 20;
     
     // Add organization info
@@ -52,54 +59,99 @@ export const generatePdf = async (
       doc.text(contactDetails.website, margin, yPos);
       yPos += 15;
     }
-
-    // Initialize table of contents
+    
+    // Store TOC position
     const tocStartY = yPos;
     doc.setFontSize(16);
     doc.setTextColor(43, 87, 151);
     doc.text('Table of Contents', margin, yPos);
-    yPos += 10;
-
-    // Store sections and their page numbers
-    const sections: { title: string; page: number }[] = [];
-    let currentPage = 1;
-
-    // Add executive summary if available
-    if (campaignData.executiveSummary) {
-      sections.push({ title: 'Executive Summary', page: currentPage });
-      yPos = addSection(doc, 'Executive Summary', campaignData.executiveSummary, margin, yPos, contentWidth, pageHeight);
-      currentPage = doc.internal.getNumberOfPages();
-    }
-
-    // Add specific report content based on type
-    if (reportType === 'combined' || reportType === 'messaging') {
-      if (campaignData.step1Analysis) {
-        sections.push({ title: 'Strategic Analysis', page: currentPage });
-        yPos = addSection(doc, 'Strategic Analysis', campaignData.step1Analysis, margin, yPos, contentWidth, pageHeight);
-        currentPage = doc.internal.getNumberOfPages();
+    yPos += 15;
+    
+    // Process each section
+    for (const section of formattedReport.sections) {
+      // Skip sections not relevant to the report type
+      if (!shouldIncludeSection(section.title, reportType)) continue;
+      
+      // Check if we need a new page
+      if (yPos > pageHeight - 50) {
+        doc.addPage();
+        currentPage++;
+        yPos = margin;
       }
       
-      if (campaignData.messagingGuide) {
-        sections.push({ title: 'Messaging Guide', page: currentPage });
-        yPos = addSection(doc, 'Messaging Guide', campaignData.messagingGuide, margin, yPos, contentWidth, pageHeight);
-        currentPage = doc.internal.getNumberOfPages();
+      // Track section start page
+      sections.push({
+        title: section.title,
+        page: currentPage
+      });
+      
+      // Add section title
+      doc.setFontSize(16);
+      doc.setTextColor(43, 87, 151);
+      doc.text(section.title, margin, yPos);
+      yPos += 10;
+      
+      // Process section content
+      doc.setFontSize(12);
+      doc.setTextColor(51, 51, 51);
+      
+      const contentParts = section.content.split(/\[TABLE:([^\]]+)\]/);
+      for (let i = 0; i < contentParts.length; i++) {
+        if (i % 2 === 0) {
+          // Regular content
+          if (contentParts[i].trim()) {
+            const paragraphs = contentParts[i].trim().split('\n\n');
+            for (const paragraph of paragraphs) {
+              const lines = doc.splitTextToSize(paragraph.trim(), contentWidth);
+              for (const line of lines) {
+                if (yPos > pageHeight - 20) {
+                  doc.addPage();
+                  currentPage++;
+                  yPos = margin;
+                }
+                doc.text(line, margin, yPos);
+                yPos += 7;
+              }
+              yPos += 5; // Paragraph spacing
+            }
+          }
+        } else {
+          // Table reference
+          const tableId = contentParts[i];
+          const tableData = formattedReport.tables.get(tableId);
+          if (tableData) {
+            if (yPos > pageHeight - 50) {
+              doc.addPage();
+              currentPage++;
+              yPos = margin;
+            }
+            
+            (doc as any).autoTable({
+              head: [tableData.headers],
+              body: tableData.rows,
+              startY: yPos,
+              margin: { left: margin },
+              styles: { fontSize: 10 },
+              headStyles: { fillColor: [43, 87, 151] }
+            });
+            
+            yPos = (doc as any).lastAutoTable.finalY + 10;
+          }
+        }
       }
     }
     
-    if (reportType === 'combined' || reportType === 'action') {
-      if (campaignData.actionPlan) {
-        sections.push({ title: 'Action Plan', page: currentPage });
-        yPos = addSection(doc, 'Action Plan', campaignData.actionPlan, margin, yPos, contentWidth, pageHeight);
-      }
-    }
-
     // Go back to first page and add TOC
     doc.setPage(1);
     yPos = tocStartY + 15;
     doc.setFontSize(12);
     doc.setTextColor(51, 51, 51);
-
+    
     sections.forEach((section) => {
+      if (yPos > pageHeight - 20) {
+        doc.addPage();
+        yPos = margin;
+      }
       doc.text(section.title, margin, yPos);
       doc.text(section.page.toString(), pageWidth - margin, yPos, { align: 'right' });
       yPos += 7;
@@ -116,103 +168,16 @@ export const generatePdf = async (
   }
 };
 
-const addSection = (
-  doc: jsPDF,
-  title: string,
-  content: string,
-  margin: number,
-  startY: number,
-  contentWidth: number,
-  pageHeight: number
-): number => {
-  const lineHeight = 7;
-  const titleMargin = 10;
-  let currentY = startY;
-
-  // Check if we need a new page for the section
-  if (currentY + 30 > pageHeight - margin) {
-    doc.addPage();
-    currentY = margin;
-  }
-
-  // Add section title
-  doc.setFontSize(16);
-  doc.setTextColor(43, 87, 151);
-  doc.text(title, margin, currentY);
-  currentY += titleMargin + lineHeight;
-
-  // Add section content
-  doc.setFontSize(12);
-  doc.setTextColor(51, 51, 51);
-
-  // Parse content for tables
-  const parts = content.split(/(?=\|)|(?<=\n)/);
-  let isInTable = false;
-  let tableData: string[][] = [];
-  let tableHeaders: string[] = [];
-
-  for (const part of parts) {
-    if (part.startsWith('|')) {
-      if (!isInTable) {
-        // Start new table
-        isInTable = true;
-        const headerRow = part.split('|').filter(cell => cell.trim());
-        tableHeaders = headerRow.map(header => header.trim());
-        tableData = [];
-      } else {
-        // Add table row
-        if (!part.includes('|-')) { // Skip separator row
-          const row = part.split('|').filter(cell => cell.trim());
-          tableData.push(row.map(cell => cell.trim()));
-        }
-      }
-    } else {
-      if (isInTable) {
-        // End table and render it
-        isInTable = false;
-        if (currentY + 30 > pageHeight - margin) {
-          doc.addPage();
-          currentY = margin;
-        }
-        (doc as any).autoTable({
-          head: [tableHeaders],
-          body: tableData,
-          startY: currentY,
-          margin: { left: margin },
-          styles: { fontSize: 10 },
-          headStyles: { fillColor: [43, 87, 151] }
-        });
-        currentY = (doc as any).lastAutoTable.finalY + 10;
-        tableData = [];
-        tableHeaders = [];
-      }
-
-      // Regular text content
-      if (part.trim()) {
-        const splitContent = doc.splitTextToSize(part.trim(), contentWidth);
-        for (const line of splitContent) {
-          if (currentY > pageHeight - margin) {
-            doc.addPage();
-            currentY = margin;
-          }
-          doc.text(line, margin, currentY);
-          currentY += lineHeight;
-        }
-      }
-    }
-  }
-
-  return currentY + 15;
-};
-
-const getReportTitle = (reportType: 'combined' | 'messaging' | 'action'): string => {
+const shouldIncludeSection = (sectionTitle: string, reportType: string): boolean => {
   switch (reportType) {
     case 'combined':
-      return 'Campaign Report';
+      return true;
     case 'messaging':
-      return 'Campaign Messaging Guide';
+      return ['Executive Summary', 'Strategic Analysis', 'Messaging Guide'].includes(sectionTitle);
     case 'action':
-      return 'Campaign Action Plan';
+      return ['Executive Summary', 'Action Plan'].includes(sectionTitle);
+    default:
+      return false;
   }
 };
 
