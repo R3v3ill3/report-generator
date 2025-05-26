@@ -1,4 +1,4 @@
-import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, BorderStyle, AlignmentType, TableOfContents } from 'docx';
+import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, BorderStyle, AlignmentType, TableOfContents, ImageRun } from 'docx';
 import { CampaignData, ReportOptions } from '../contexts/CampaignContext';
 import { formatFullReport } from './reportFormatter';
 
@@ -17,16 +17,6 @@ const STYLES = {
     size: 24,
     color: "333333",
   },
-  table: {
-    width: { size: 100, type: "pct" },
-    margins: { top: 100, bottom: 100, left: 100, right: 100 },
-    borders: {
-      top: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
-      bottom: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
-      left: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
-      right: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
-    },
-  },
 };
 
 export const generateDocx = async (
@@ -40,10 +30,28 @@ export const generateDocx = async (
     // Format the report content first
     const formattedReport = await formatFullReport(campaignData);
     
-    // Initialize document sections
+    // Initialize document children array
     const children: any[] = [];
-    const sections: { title: string; startPage: number }[] = [];
-    let currentPage = 1;
+    
+    // Add logo if available
+    if (reportOptions.logoDataUrl) {
+      const base64Data = reportOptions.logoDataUrl.split(',')[1];
+      children.push(
+        new Paragraph({
+          children: [
+            new ImageRun({
+              data: Buffer.from(base64Data, 'base64'),
+              transformation: {
+                width: 200,
+                height: 100,
+              },
+            }),
+          ],
+          alignment: AlignmentType.CENTER,
+          spacing: { after: 400 },
+        })
+      );
+    }
     
     // Add title
     children.push(
@@ -58,13 +66,19 @@ export const generateDocx = async (
     // Add organization info
     children.push(...getOrganizationInfoParagraphs(reportOptions.contactDetails));
     
-    // Add table of contents placeholder
-    const tocStart = children.length;
+    // Add table of contents
     children.push(
       new Paragraph({
         text: "Table of Contents",
         heading: HeadingLevel.HEADING_1,
         spacing: { before: 400, after: 200 },
+      }),
+      new TableOfContents("Table of Contents", {
+        hyperlink: true,
+        headingStyleRange: "1-3",
+      }),
+      new Paragraph({
+        children: [new TextRun({ break: 2 })],
       })
     );
     
@@ -73,18 +87,13 @@ export const generateDocx = async (
       // Skip sections not relevant to the report type
       if (!shouldIncludeSection(section.title, reportType)) continue;
       
-      // Track section start page
-      sections.push({
-        title: section.title,
-        startPage: currentPage
-      });
-      
       // Add section title
       children.push(
         new Paragraph({
           text: section.title,
           heading: HeadingLevel.HEADING_1,
           spacing: { before: 400, after: 200 },
+          pageBreakBefore: true,
         })
       );
       
@@ -101,7 +110,7 @@ export const generateDocx = async (
                   children: [
                     new TextRun({
                       text: paragraph.trim(),
-                      ...STYLES.normalText,
+                      size: 24,
                     }),
                   ],
                   spacing: { after: 200 },
@@ -122,28 +131,51 @@ export const generateDocx = async (
             );
           }
         }
-        
-        // Update current page based on content
-        currentPage = Math.ceil(children.length / 40) + 1; // Approximate 40 elements per page
       }
     }
     
-    // Generate table of contents
-    const toc = new TableOfContents("Table of Contents", {
-      hyperlink: true,
-      headingStyleRange: "1-3",
-      stylesWithLevels: sections.map((section, index) => ({
-        level: 0,
-        styleId: `Heading${index + 1}`,
-        pageNumber: section.startPage
-      })),
-    });
-    
-    // Insert TOC after placeholder
-    children.splice(tocStart + 1, 0, toc);
-    
-    // Create the document
+    // Create the document with proper styles
     const doc = new Document({
+      styles: {
+        paragraphStyles: [
+          {
+            id: "Heading1",
+            name: "Heading 1",
+            basedOn: "Normal",
+            next: "Normal",
+            quickFormat: true,
+            run: {
+              size: 32,
+              bold: true,
+              color: "2B5797",
+            },
+            paragraph: {
+              spacing: {
+                before: 240,
+                after: 120,
+              },
+            },
+          },
+          {
+            id: "Heading2",
+            name: "Heading 2",
+            basedOn: "Normal",
+            next: "Normal",
+            quickFormat: true,
+            run: {
+              size: 28,
+              bold: true,
+              color: "2B5797",
+            },
+            paragraph: {
+              spacing: {
+                before: 240,
+                after: 120,
+              },
+            },
+          },
+        ],
+      },
       sections: [{
         properties: {},
         children: children,
@@ -192,7 +224,7 @@ const getOrganizationInfoParagraphs = (contactDetails: ReportOptions['contactDet
         children: [
           new TextRun({
             text: contactDetails.contactPerson,
-            ...STYLES.normalText,
+            size: 24,
           }),
         ],
       })
@@ -205,7 +237,7 @@ const getOrganizationInfoParagraphs = (contactDetails: ReportOptions['contactDet
         children: [
           new TextRun({
             text: contactDetails.email,
-            ...STYLES.normalText,
+            size: 24,
           }),
         ],
       })
@@ -218,7 +250,7 @@ const getOrganizationInfoParagraphs = (contactDetails: ReportOptions['contactDet
         children: [
           new TextRun({
             text: contactDetails.phone,
-            ...STYLES.normalText,
+            size: 24,
           }),
         ],
       })
@@ -231,7 +263,7 @@ const getOrganizationInfoParagraphs = (contactDetails: ReportOptions['contactDet
         children: [
           new TextRun({
             text: contactDetails.website,
-            ...STYLES.normalText,
+            size: 24,
           }),
         ],
         spacing: { after: 400 },
