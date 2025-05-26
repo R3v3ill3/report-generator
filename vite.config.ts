@@ -8,7 +8,6 @@ export default defineConfig({
     exclude: ['lucide-react'],
   },
   server: {
-    https: true,
     host: true, // Expose to all network interfaces
   },
 });
