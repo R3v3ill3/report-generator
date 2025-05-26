@@ -1,4 +1,10 @@
 import { CampaignData } from '../contexts/CampaignContext';
+import OpenAI from 'openai';
+
+const openai = new OpenAI({
+  apiKey: import.meta.env.VITE_OPENAI_API_KEY,
+  dangerouslyAllowBrowser: true // Only for demo purposes
+});
 
 const EXECUTIVE_SUMMARY_PROMPT = `
 Generate a professional executive summary for a campaign report with the following sections:
@@ -35,13 +41,7 @@ Ensure all content is business-appropriate and professionally written.
 
 export const generateExecutiveSummary = async (campaignData: CampaignData): Promise<string | null> => {
   try {
-    // For this demo, we'll simulate the OpenAI API call
-    // In a real implementation, you would make an actual API call to OpenAI
-    
     console.log('Generating executive summary for campaign:', campaignData.id);
-    
-    // Simulate API delay
-    await new Promise(resolve => setTimeout(resolve, 2000));
     
     // Extract relevant data for the prompt
     const messagingHighlights = campaignData.messagingGuide ? 
@@ -53,41 +53,43 @@ export const generateExecutiveSummary = async (campaignData: CampaignData): Prom
     const step1Highlights = campaignData.step1Analysis ?
       campaignData.step1Analysis.substring(0, 1000) : 'Not available';
 
-    // Create a sample executive summary based on campaign data
-    let summary = `Executive Summary: ${campaignData.summary?.purpose}\n\n`;
+    const prompt = `
+      ${EXECUTIVE_SUMMARY_PROMPT}
+
+      Campaign Purpose: ${campaignData.summary?.purpose}
+
+      Messaging Guide Highlights:
+      ${messagingHighlights}
+
+      Action Plan Highlights:
+      ${actionPlanHighlights}
+
+      Strategic Analysis:
+      ${step1Highlights}
+    `;
+
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4",
+      messages: [
+        {
+          role: "system",
+          content: "You are a professional campaign strategist and business writer."
+        },
+        {
+          role: "user",
+          content: prompt
+        }
+      ],
+      temperature: 0.7,
+      max_tokens: 1500
+    });
+
+    const summary = completion.choices[0]?.message?.content;
     
-    // Overview Section
-    summary += `Overview\n\n`;
-    summary += `This comprehensive campaign strategy addresses ${campaignData.summary?.purpose}, targeting ${campaignData.messagingGuide ? 'specific audience segments' : 'key stakeholders'} through a multi-channel approach. The campaign aims to achieve measurable outcomes through strategic messaging and tactical implementation.\n\n`;
-    
-    // Messaging Strategy Summary
-    if (campaignData.messagingGuide) {
-      summary += `Messaging Strategy\n\n`;
-      summary += `The messaging framework leverages core values and narratives that resonate with target audiences. Key themes include community engagement, positive change, and actionable solutions.\n\n`;
-      
-      // Key Messages Table
-      summary += `Key Messages\n\n`;
-      summary += `| Message Type | Core Theme | Target Response | Effectiveness |\n`;
-      summary += `|--------------|------------|-----------------|---------------|\n`;
-      summary += `| Values-Based | Community Impact | Emotional Connection | High |\n`;
-      summary += `| Action-Oriented | Practical Solutions | Engagement | Medium-High |\n`;
-      summary += `| Social Proof | Collective Success | Trust Building | High |\n\n`;
+    if (!summary) {
+      throw new Error('No summary generated');
     }
-    
-    // Action Plan Highlights
-    if (campaignData.actionPlan) {
-      summary += `Action Plan Highlights\n\n`;
-      summary += `The implementation strategy spans multiple phases with clear milestones and success metrics. Key resources have been allocated to ensure effective execution across all campaign touchpoints.\n\n`;
-      
-      // Implementation Summary Table
-      summary += `Implementation Timeline\n\n`;
-      summary += `| Phase | Timeline | Key Activities | Expected Outcomes |\n`;
-      summary += `|-------|----------|----------------|-------------------|\n`;
-      summary += `| Launch | Weeks 1-2 | Platform Setup, Initial Content | Awareness |\n`;
-      summary += `| Growth | Weeks 3-4 | Community Engagement | Participation |\n`;
-      summary += `| Peak | Weeks 5-6 | Action Campaigns | Conversion |\n\n`;
-    }
-    
+
     // Format the summary
     const formattedSummary = await formatExecutiveSummary(summary);
     return formattedSummary;
@@ -100,9 +102,6 @@ export const generateExecutiveSummary = async (campaignData: CampaignData): Prom
 
 const formatExecutiveSummary = async (content: string): Promise<string> => {
   try {
-    // Simulate formatting API call
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
     // Remove markdown-style formatting
     let formatted = content
       .replace(/\*\*/g, '')
