@@ -64,24 +64,23 @@ export const generatePdf = async (
     const sections: { title: string; page: number }[] = [];
     let currentPage = 1;
 
-    // Add executive summary if available
+    // Add sections based on report type
     if (campaignData.executiveSummary) {
       sections.push({ title: 'Executive Summary', page: currentPage });
-      yPos = addSection(doc, 'Executive Summary', campaignData.executiveSummary, margin, yPos, contentWidth, pageHeight);
+      yPos = addFormattedSection(doc, 'Executive Summary', campaignData.executiveSummary, margin, yPos, contentWidth, pageHeight);
       currentPage = doc.internal.getNumberOfPages();
     }
 
-    // Add specific report content based on type
     if (reportType === 'combined' || reportType === 'messaging') {
       if (campaignData.step1Analysis) {
         sections.push({ title: 'Strategic Analysis', page: currentPage });
-        yPos = addSection(doc, 'Strategic Analysis', campaignData.step1Analysis, margin, yPos, contentWidth, pageHeight);
+        yPos = addFormattedSection(doc, 'Strategic Analysis', campaignData.step1Analysis, margin, yPos, contentWidth, pageHeight);
         currentPage = doc.internal.getNumberOfPages();
       }
       
       if (campaignData.messagingGuide) {
         sections.push({ title: 'Messaging Guide', page: currentPage });
-        yPos = addSection(doc, 'Messaging Guide', campaignData.messagingGuide, margin, yPos, contentWidth, pageHeight);
+        yPos = addFormattedSection(doc, 'Messaging Guide', campaignData.messagingGuide, margin, yPos, contentWidth, pageHeight);
         currentPage = doc.internal.getNumberOfPages();
       }
     }
@@ -89,7 +88,7 @@ export const generatePdf = async (
     if (reportType === 'combined' || reportType === 'action') {
       if (campaignData.actionPlan) {
         sections.push({ title: 'Action Plan', page: currentPage });
-        yPos = addSection(doc, 'Action Plan', campaignData.actionPlan, margin, yPos, contentWidth, pageHeight);
+        yPos = addFormattedSection(doc, 'Action Plan', campaignData.actionPlan, margin, yPos, contentWidth, pageHeight);
       }
     }
 
@@ -116,7 +115,7 @@ export const generatePdf = async (
   }
 };
 
-const addSection = (
+const addFormattedSection = (
   doc: jsPDF,
   title: string,
   content: string,
@@ -125,9 +124,9 @@ const addSection = (
   contentWidth: number,
   pageHeight: number
 ): number => {
+  let currentY = startY;
   const lineHeight = 7;
   const titleMargin = 10;
-  let currentY = startY;
 
   // Check if we need a new page for the section
   if (currentY + 30 > pageHeight - margin) {
@@ -141,18 +140,109 @@ const addSection = (
   doc.text(title, margin, currentY);
   currentY += titleMargin + lineHeight;
 
-  // Add section content
-  doc.setFontSize(12);
-  doc.setTextColor(51, 51, 51);
-  const splitContent = doc.splitTextToSize(content, contentWidth);
-  
-  for (const line of splitContent) {
-    if (currentY > pageHeight - margin) {
-      doc.addPage();
-      currentY = margin;
+  // Process content
+  const lines = content.split('\n');
+  let inTable = false;
+  let tableData: string[][] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+
+    // Handle table lines
+    if (line.startsWith('|') && line.endsWith('|')) {
+      if (!inTable) {
+        inTable = true;
+        tableData = [];
+      }
+      const cells = line.slice(1, -1).split('|').map(cell => cell.trim());
+      if (cells.length > 0) {
+        tableData.push(cells);
+      }
+      continue;
     }
-    doc.text(line, margin, currentY);
-    currentY += lineHeight;
+
+    // Handle end of table
+    if (inTable && (!line.startsWith('|') || !line.endsWith('|'))) {
+      inTable = false;
+      if (tableData.length > 0) {
+        // Remove separator row if present
+        const cleanTableData = tableData.filter(row => !row.every(cell => /^[-:]+$/.test(cell)));
+        
+        // Add table using jspdf-autotable
+        doc.autoTable({
+          startY: currentY,
+          head: [cleanTableData[0]],
+          body: cleanTableData.slice(1),
+          margin: { left: margin },
+          tableWidth: contentWidth,
+          styles: {
+            fontSize: 10,
+            cellPadding: 3,
+          },
+          headStyles: {
+            fillColor: [43, 87, 151],
+            textColor: 255,
+            fontStyle: 'bold',
+          },
+        });
+        
+        currentY = (doc as any).lastAutoTable.finalY + 10;
+        tableData = [];
+      }
+    }
+
+    // Handle headings
+    if (line.match(/^#{1,6}\s/)) {
+      const level = line.match(/^(#{1,6})\s/)?.[1].length || 1;
+      const text = line.replace(/^#{1,6}\s/, '');
+      
+      if (currentY + 20 > pageHeight - margin) {
+        doc.addPage();
+        currentY = margin;
+      }
+      
+      doc.setFontSize(18 - (level * 2));
+      doc.setTextColor(43, 87, 151);
+      doc.text(text, margin, currentY);
+      currentY += lineHeight + 5;
+      continue;
+    }
+
+    // Handle regular paragraphs
+    if (line !== '' && !inTable) {
+      if (currentY + lineHeight > pageHeight - margin) {
+        doc.addPage();
+        currentY = margin;
+      }
+      
+      doc.setFontSize(12);
+      doc.setTextColor(51, 51, 51);
+      const splitText = doc.splitTextToSize(line, contentWidth);
+      doc.text(splitText, margin, currentY);
+      currentY += (splitText.length * lineHeight) + 3;
+    }
+  }
+
+  // Handle any remaining table
+  if (tableData.length > 0) {
+    const cleanTableData = tableData.filter(row => !row.every(cell => /^[-:]+$/.test(cell)));
+    doc.autoTable({
+      startY: currentY,
+      head: [cleanTableData[0]],
+      body: cleanTableData.slice(1),
+      margin: { left: margin },
+      tableWidth: contentWidth,
+      styles: {
+        fontSize: 10,
+        cellPadding: 3,
+      },
+      headStyles: {
+        fillColor: [43, 87, 151],
+        textColor: 255,
+        fontStyle: 'bold',
+      },
+    });
+    currentY = (doc as any).lastAutoTable.finalY + 10;
   }
 
   return currentY + 15;
