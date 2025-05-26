@@ -15,6 +15,7 @@ const questions = [
 ];
 
 async function createEnvFile(answers) {
+  // Changed OPENAI_API_KEY to VITE_OPENAI_API_KEY to match what's expected in the service
   const envContent = `VITE_OPENAI_API_KEY=${answers.openaiApiKey}\n`;
   await fs.writeFile('.env', envContent);
   console.log('✅ Created .env file with API key');
