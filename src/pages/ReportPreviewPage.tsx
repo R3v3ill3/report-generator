@@ -5,6 +5,7 @@ import toast from 'react-hot-toast';
 import { useCampaign } from '../contexts/CampaignContext';
 import { generateDocx } from '../services/docxGenerator';
 import { generatePdf } from '../services/pdfGenerator';
+import { formatFullReport } from '../services/reportFormatter';
 
 const ReportPreviewPage: React.FC = () => {
   const navigate = useNavigate();
@@ -53,16 +54,19 @@ const ReportPreviewPage: React.FC = () => {
     try {
       const reportTitle = getReportTitle();
       
+      // Format the report content using OpenAI
+      const formattedCampaignData = await formatFullReport(campaignData!);
+      
       if (format === 'pdf') {
         await generatePdf(
-          campaignData, 
-          reportOptions, 
+          formattedCampaignData, 
+          reportOptions!, 
           activeTab === 'combined' ? 'combined' : activeTab === 'messaging' ? 'messaging' : 'action'
         );
       } else {
         await generateDocx(
-          campaignData, 
-          reportOptions, 
+          formattedCampaignData, 
+          reportOptions!, 
           activeTab === 'combined' ? 'combined' : activeTab === 'messaging' ? 'messaging' : 'action'
         );
       }
