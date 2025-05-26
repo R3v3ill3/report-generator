@@ -1,40 +1,92 @@
 import { CampaignData, ReportOptions } from '../contexts/CampaignContext';
+import { jsPDF } from 'jspdf';
 
-/**
- * Generates a PDF report for the campaign
- * @param campaignData The campaign data
- * @param reportOptions Report customization options
- * @param reportType The type of report to generate
- * @returns Promise resolving when PDF generation is complete
- */
 export const generatePdf = async (
   campaignData: CampaignData,
   reportOptions: ReportOptions,
   reportType: 'combined' | 'messaging' | 'action'
 ): Promise<void> => {
-  // For this demo, we'll simulate PDF generation
-  // In a real implementation, you would use a library like jsPDF, PDF-lib, or a server-side PDF generation service
-  
   try {
     console.log(`Generating ${reportType} PDF report for campaign:`, campaignData.id);
     
-    // Simulate PDF generation delay
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    const doc = new jsPDF();
+    let yPos = 20;
+    const pageWidth = doc.internal.pageSize.width;
+    const margin = 20;
+    const contentWidth = pageWidth - (margin * 2);
     
-    // Determine the filename
-    let filename = '';
-    if (reportType === 'combined') {
-      filename = `${sanitizeFilename(campaignData.summary?.purpose || 'campaign')}_combined_report.pdf`;
-    } else if (reportType === 'messaging') {
-      filename = `${sanitizeFilename(campaignData.summary?.purpose || 'campaign')}_messaging_guide.pdf`;
-    } else {
-      filename = `${sanitizeFilename(campaignData.summary?.purpose || 'campaign')}_action_plan.pdf`;
+    // Add logo if available
+    if (reportOptions.logoDataUrl) {
+      doc.addImage(reportOptions.logoDataUrl, 'PNG', margin, yPos, 40, 20);
+      yPos += 30;
     }
     
-    // In a real implementation, you would generate the PDF here
-    // For this demo, we'll simulate a download by creating a simple text file
-    const content = getReportContent(campaignData, reportOptions, reportType);
-    downloadTextAsFile(content, filename);
+    // Add title
+    doc.setFontSize(24);
+    doc.setTextColor(43, 87, 151); // Blue color
+    const title = getReportTitle(reportType);
+    doc.text(title, pageWidth / 2, yPos, { align: 'center' });
+    yPos += 20;
+    
+    // Add organization info
+    doc.setFontSize(12);
+    doc.setTextColor(51, 51, 51); // Dark gray
+    const { contactDetails } = reportOptions;
+    doc.text(contactDetails.organizationName, margin, yPos);
+    yPos += 7;
+    if (contactDetails.contactPerson) {
+      doc.text(contactDetails.contactPerson, margin, yPos);
+      yPos += 7;
+    }
+    if (contactDetails.email) {
+      doc.text(contactDetails.email, margin, yPos);
+      yPos += 7;
+    }
+    if (contactDetails.phone) {
+      doc.text(contactDetails.phone, margin, yPos);
+      yPos += 7;
+    }
+    if (contactDetails.website) {
+      doc.text(contactDetails.website, margin, yPos);
+      yPos += 15;
+    }
+    
+    // Add executive summary if available
+    if (campaignData.executiveSummary) {
+      doc.setFontSize(16);
+      doc.setTextColor(43, 87, 151);
+      doc.text('Executive Summary', margin, yPos);
+      yPos += 10;
+      
+      doc.setFontSize(12);
+      doc.setTextColor(51, 51, 51);
+      const splitSummary = doc.splitTextToSize(campaignData.executiveSummary, contentWidth);
+      doc.text(splitSummary, margin, yPos);
+      yPos += (splitSummary.length * 7) + 15;
+    }
+    
+    // Add specific report content based on type
+    if (reportType === 'combined' || reportType === 'messaging') {
+      if (campaignData.step1Analysis) {
+        addSection(doc, 'Strategic Analysis', campaignData.step1Analysis, margin, yPos, contentWidth);
+        yPos = doc.internal.getCurrentPageInfo().pageNumber === 1 ? yPos + 40 : 20;
+      }
+      
+      if (campaignData.messagingGuide) {
+        addSection(doc, 'Messaging Guide', campaignData.messagingGuide, margin, yPos, contentWidth);
+        yPos = doc.internal.getCurrentPageInfo().pageNumber === 1 ? yPos + 40 : 20;
+      }
+    }
+    
+    if (reportType === 'combined' || reportType === 'action') {
+      if (campaignData.actionPlan) {
+        addSection(doc, 'Action Plan', campaignData.actionPlan, margin, yPos, contentWidth);
+      }
+    }
+    
+    // Save the PDF
+    const filename = getReportFilename(campaignData, reportType);
+    doc.save(filename);
     
     console.log(`PDF report "${filename}" generated successfully`);
   } catch (error) {
@@ -43,93 +95,50 @@ export const generatePdf = async (
   }
 };
 
-/**
- * Gets the content for the report based on type
- */
-const getReportContent = (
-  campaignData: CampaignData,
-  reportOptions: ReportOptions,
-  reportType: 'combined' | 'messaging' | 'action'
-): string => {
-  const { contactDetails } = reportOptions;
-  let content = '';
+const addSection = (
+  doc: jsPDF,
+  title: string,
+  content: string,
+  margin: number,
+  startY: number,
+  contentWidth: number
+) => {
+  doc.setFontSize(16);
+  doc.setTextColor(43, 87, 151);
+  doc.text(title, margin, startY);
   
-  // Add report header
-  if (reportType === 'combined') {
-    content += `COMBINED CAMPAIGN REPORT\n`;
-  } else if (reportType === 'messaging') {
-    content += `CAMPAIGN MESSAGING GUIDE\n`;
-  } else {
-    content += `CAMPAIGN ACTION PLAN\n`;
-  }
-  content += `============================\n\n`;
-  
-  // Add organization info
-  content += `Organization: ${contactDetails.organizationName}\n`;
-  if (contactDetails.contactPerson) content += `Contact: ${contactDetails.contactPerson}\n`;
-  if (contactDetails.email) content += `Email: ${contactDetails.email}\n`;
-  if (contactDetails.phone) content += `Phone: ${contactDetails.phone}\n`;
-  if (contactDetails.website) content += `Website: ${contactDetails.website}\n`;
-  content += `\n`;
-  
-  // Add campaign info
-  content += `Campaign: ${campaignData.summary?.purpose || 'Untitled Campaign'}\n`;
-  content += `Generated: ${new Date().toLocaleDateString()}\n\n`;
-  
-  // Add executive summary if available
-  if (campaignData.executiveSummary) {
-    content += `EXECUTIVE SUMMARY\n`;
-    content += `----------------\n`;
-    content += `${campaignData.executiveSummary}\n\n`;
-  }
-  
-  // Add specific report content based on type
-  if (reportType === 'combined' || reportType === 'messaging') {
-    if (campaignData.step1Analysis) {
-      content += `MESSAGING ANALYSIS\n`;
-      content += `----------------\n`;
-      content += `${campaignData.step1Analysis}\n\n`;
-    }
-    
-    if (campaignData.messagingGuide) {
-      content += `MESSAGING GUIDE\n`;
-      content += `----------------\n`;
-      content += `${campaignData.messagingGuide}\n\n`;
-    }
-  }
-  
-  if (reportType === 'combined' || reportType === 'action') {
-    if (campaignData.actionPlan) {
-      content += `ACTION PLAN\n`;
-      content += `----------------\n`;
-      content += `${campaignData.actionPlan}\n\n`;
-    }
-  }
-  
-  return content;
+  doc.setFontSize(12);
+  doc.setTextColor(51, 51, 51);
+  const splitContent = doc.splitTextToSize(content, contentWidth);
+  doc.text(splitContent, margin, startY + 10);
 };
 
-/**
- * Sanitizes a string for use in a filename
- */
+const getReportTitle = (reportType: 'combined' | 'messaging' | 'action'): string => {
+  switch (reportType) {
+    case 'combined':
+      return 'Campaign Report';
+    case 'messaging':
+      return 'Campaign Messaging Guide';
+    case 'action':
+      return 'Campaign Action Plan';
+  }
+};
+
+const getReportFilename = (campaignData: CampaignData, reportType: 'combined' | 'messaging' | 'action'): string => {
+  const baseFilename = sanitizeFilename(campaignData.summary?.purpose || 'campaign');
+  switch (reportType) {
+    case 'combined':
+      return `${baseFilename}_combined_report.pdf`;
+    case 'messaging':
+      return `${baseFilename}_messaging_guide.pdf`;
+    case 'action':
+      return `${baseFilename}_action_plan.pdf`;
+  }
+};
+
 const sanitizeFilename = (input: string): string => {
   return input
     .toLowerCase()
     .replace(/[^a-z0-9_.-]/gi, '_')
     .substring(0, 50);
-};
-
-/**
- * Helper function to simulate file download
- */
-const downloadTextAsFile = (text: string, filename: string): void => {
-  const blob = new Blob([text], { type: 'text/plain' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
 };

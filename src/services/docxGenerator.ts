@@ -1,40 +1,78 @@
+import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, BorderStyle, AlignmentType } from 'docx';
 import { CampaignData, ReportOptions } from '../contexts/CampaignContext';
 
-/**
- * Generates a DOCX report for the campaign
- * @param campaignData The campaign data
- * @param reportOptions Report customization options
- * @param reportType The type of report to generate
- * @returns Promise resolving when DOCX generation is complete
- */
+const STYLES = {
+  heading1: {
+    size: 32,
+    bold: true,
+    color: "2B5797",
+  },
+  heading2: {
+    size: 28,
+    bold: true,
+    color: "2B5797",
+  },
+  normalText: {
+    size: 24,
+    color: "333333",
+  },
+  table: {
+    width: { size: 100, type: "pct" },
+    margins: { top: 100, bottom: 100, left: 100, right: 100 },
+    borders: {
+      top: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
+      bottom: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
+      left: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
+      right: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
+    },
+  },
+};
+
 export const generateDocx = async (
   campaignData: CampaignData,
   reportOptions: ReportOptions,
   reportType: 'combined' | 'messaging' | 'action'
 ): Promise<void> => {
-  // For this demo, we'll simulate DOCX generation
-  // In a real implementation, you would use a library like docx.js
-  
   try {
     console.log(`Generating ${reportType} DOCX report for campaign:`, campaignData.id);
     
-    // Simulate DOCX generation delay
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    const doc = new Document({
+      sections: [{
+        properties: {},
+        children: [
+          // Title
+          new Paragraph({
+            text: getReportTitle(reportType),
+            heading: HeadingLevel.HEADING_1,
+            alignment: AlignmentType.CENTER,
+            spacing: { after: 400 },
+          }),
+          
+          // Organization Info
+          ...getOrganizationInfoParagraphs(reportOptions.contactDetails),
+          
+          // Executive Summary
+          ...(campaignData.executiveSummary ? getExecutiveSummarySection(campaignData.executiveSummary) : []),
+          
+          // Report Content
+          ...getReportContent(campaignData, reportType),
+        ],
+      }],
+    });
     
-    // Determine the filename
-    let filename = '';
-    if (reportType === 'combined') {
-      filename = `${sanitizeFilename(campaignData.summary?.purpose || 'campaign')}_combined_report.docx`;
-    } else if (reportType === 'messaging') {
-      filename = `${sanitizeFilename(campaignData.summary?.purpose || 'campaign')}_messaging_guide.docx`;
-    } else {
-      filename = `${sanitizeFilename(campaignData.summary?.purpose || 'campaign')}_action_plan.docx`;
-    }
+    // Generate and save the document
+    const buffer = await Packer.toBlob(doc);
+    const filename = getReportFilename(campaignData, reportType);
     
-    // In a real implementation, you would generate the DOCX here
-    // For this demo, we'll simulate a download by creating a simple text file
-    const content = getReportContent(campaignData, reportOptions, reportType);
-    downloadTextAsFile(content, filename);
+    // Create download link
+    const url = window.URL.createObjectURL(buffer);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
     
     console.log(`DOCX report "${filename}" generated successfully`);
   } catch (error) {
@@ -43,93 +81,189 @@ export const generateDocx = async (
   }
 };
 
-/**
- * Gets the content for the report based on type
- */
-const getReportContent = (
-  campaignData: CampaignData,
-  reportOptions: ReportOptions,
-  reportType: 'combined' | 'messaging' | 'action'
-): string => {
-  const { contactDetails } = reportOptions;
-  let content = '';
+const getOrganizationInfoParagraphs = (contactDetails: ReportOptions['contactDetails']) => {
+  const paragraphs = [];
   
-  // Add report header
-  if (reportType === 'combined') {
-    content += `COMBINED CAMPAIGN REPORT\n`;
-  } else if (reportType === 'messaging') {
-    content += `CAMPAIGN MESSAGING GUIDE\n`;
-  } else {
-    content += `CAMPAIGN ACTION PLAN\n`;
-  }
-  content += `============================\n\n`;
+  paragraphs.push(
+    new Paragraph({
+      children: [
+        new TextRun({
+          text: contactDetails.organizationName,
+          ...STYLES.heading2,
+        }),
+      ],
+      spacing: { after: 200 },
+    })
+  );
   
-  // Add organization info
-  content += `Organization: ${contactDetails.organizationName}\n`;
-  if (contactDetails.contactPerson) content += `Contact: ${contactDetails.contactPerson}\n`;
-  if (contactDetails.email) content += `Email: ${contactDetails.email}\n`;
-  if (contactDetails.phone) content += `Phone: ${contactDetails.phone}\n`;
-  if (contactDetails.website) content += `Website: ${contactDetails.website}\n`;
-  content += `\n`;
-  
-  // Add campaign info
-  content += `Campaign: ${campaignData.summary?.purpose || 'Untitled Campaign'}\n`;
-  content += `Generated: ${new Date().toLocaleDateString()}\n\n`;
-  
-  // Add executive summary if available
-  if (campaignData.executiveSummary) {
-    content += `EXECUTIVE SUMMARY\n`;
-    content += `----------------\n`;
-    content += `${campaignData.executiveSummary}\n\n`;
+  if (contactDetails.contactPerson) {
+    paragraphs.push(
+      new Paragraph({
+        children: [
+          new TextRun({
+            text: contactDetails.contactPerson,
+            ...STYLES.normalText,
+          }),
+        ],
+      })
+    );
   }
   
-  // Add specific report content based on type
+  if (contactDetails.email) {
+    paragraphs.push(
+      new Paragraph({
+        children: [
+          new TextRun({
+            text: contactDetails.email,
+            ...STYLES.normalText,
+          }),
+        ],
+      })
+    );
+  }
+  
+  if (contactDetails.phone) {
+    paragraphs.push(
+      new Paragraph({
+        children: [
+          new TextRun({
+            text: contactDetails.phone,
+            ...STYLES.normalText,
+          }),
+        ],
+      })
+    );
+  }
+  
+  if (contactDetails.website) {
+    paragraphs.push(
+      new Paragraph({
+        children: [
+          new TextRun({
+            text: contactDetails.website,
+            ...STYLES.normalText,
+          }),
+        ],
+        spacing: { after: 400 },
+      })
+    );
+  }
+  
+  return paragraphs;
+};
+
+const getExecutiveSummarySection = (executiveSummary: string) => {
+  return [
+    new Paragraph({
+      text: 'Executive Summary',
+      heading: HeadingLevel.HEADING_1,
+      spacing: { before: 400, after: 200 },
+    }),
+    new Paragraph({
+      children: [
+        new TextRun({
+          text: executiveSummary,
+          ...STYLES.normalText,
+        }),
+      ],
+      spacing: { after: 400 },
+    }),
+  ];
+};
+
+const getReportContent = (campaignData: CampaignData, reportType: 'combined' | 'messaging' | 'action') => {
+  const sections = [];
+  
   if (reportType === 'combined' || reportType === 'messaging') {
     if (campaignData.step1Analysis) {
-      content += `MESSAGING ANALYSIS\n`;
-      content += `----------------\n`;
-      content += `${campaignData.step1Analysis}\n\n`;
+      sections.push(
+        new Paragraph({
+          text: 'Strategic Analysis',
+          heading: HeadingLevel.HEADING_1,
+          spacing: { before: 400, after: 200 },
+        }),
+        new Paragraph({
+          children: [
+            new TextRun({
+              text: campaignData.step1Analysis,
+              ...STYLES.normalText,
+            }),
+          ],
+          spacing: { after: 400 },
+        })
+      );
     }
     
     if (campaignData.messagingGuide) {
-      content += `MESSAGING GUIDE\n`;
-      content += `----------------\n`;
-      content += `${campaignData.messagingGuide}\n\n`;
+      sections.push(
+        new Paragraph({
+          text: 'Messaging Guide',
+          heading: HeadingLevel.HEADING_1,
+          spacing: { before: 400, after: 200 },
+        }),
+        new Paragraph({
+          children: [
+            new TextRun({
+              text: campaignData.messagingGuide,
+              ...STYLES.normalText,
+            }),
+          ],
+          spacing: { after: 400 },
+        })
+      );
     }
   }
   
   if (reportType === 'combined' || reportType === 'action') {
     if (campaignData.actionPlan) {
-      content += `ACTION PLAN\n`;
-      content += `----------------\n`;
-      content += `${campaignData.actionPlan}\n\n`;
+      sections.push(
+        new Paragraph({
+          text: 'Action Plan',
+          heading: HeadingLevel.HEADING_1,
+          spacing: { before: 400, after: 200 },
+        }),
+        new Paragraph({
+          children: [
+            new TextRun({
+              text: campaignData.actionPlan,
+              ...STYLES.normalText,
+            }),
+          ],
+          spacing: { after: 400 },
+        })
+      );
     }
   }
   
-  return content;
+  return sections;
 };
 
-/**
- * Sanitizes a string for use in a filename
- */
+const getReportTitle = (reportType: 'combined' | 'messaging' | 'action'): string => {
+  switch (reportType) {
+    case 'combined':
+      return 'Campaign Report';
+    case 'messaging':
+      return 'Campaign Messaging Guide';
+    case 'action':
+      return 'Campaign Action Plan';
+  }
+};
+
+const getReportFilename = (campaignData: CampaignData, reportType: 'combined' | 'messaging' | 'action'): string => {
+  const baseFilename = sanitizeFilename(campaignData.summary?.purpose || 'campaign');
+  switch (reportType) {
+    case 'combined':
+      return `${baseFilename}_combined_report.docx`;
+    case 'messaging':
+      return `${baseFilename}_messaging_guide.docx`;
+    case 'action':
+      return `${baseFilename}_action_plan.docx`;
+  }
+};
+
 const sanitizeFilename = (input: string): string => {
   return input
     .toLowerCase()
     .replace(/[^a-z0-9_.-]/gi, '_')
     .substring(0, 50);
-};
-
-/**
- * Helper function to simulate file download
- */
-const downloadTextAsFile = (text: string, filename: string): void => {
-  const blob = new Blob([text], { type: 'text/plain' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
 };
