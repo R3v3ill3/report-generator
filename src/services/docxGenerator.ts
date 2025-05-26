@@ -1,4 +1,4 @@
-import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, BorderStyle, AlignmentType } from 'docx';
+import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, BorderStyle, AlignmentType, WidthType, convertInchesToTwip, TableBorders } from 'docx';
 import { CampaignData, ReportOptions } from '../contexts/CampaignContext';
 
 const STYLES = {
@@ -6,25 +6,39 @@ const STYLES = {
     size: 32,
     bold: true,
     color: "2B5797",
+    spacing: { before: 400, after: 200 },
   },
   heading2: {
     size: 28,
     bold: true,
     color: "2B5797",
+    spacing: { before: 300, after: 200 },
+  },
+  heading3: {
+    size: 24,
+    bold: true,
+    color: "2B5797",
+    spacing: { before: 200, after: 100 },
   },
   normalText: {
     size: 24,
     color: "333333",
+    spacing: { before: 100, after: 100 },
   },
-  table: {
-    width: { size: 100, type: "pct" },
-    margins: { top: 100, bottom: 100, left: 100, right: 100 },
-    borders: {
-      top: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
-      bottom: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
-      left: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
-      right: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
-    },
+  tableHeader: {
+    size: 24,
+    bold: true,
+    color: "FFFFFF",
+  },
+  tableCell: {
+    size: 24,
+    color: "333333",
+  },
+  tableBorders: {
+    top: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
+    bottom: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
+    left: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
+    right: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
   },
 };
 
@@ -40,16 +54,11 @@ export const generateDocx = async (
       sections: [{
         properties: {},
         children: [
-          // Title
-          new Paragraph({
-            text: getReportTitle(reportType),
-            heading: HeadingLevel.HEADING_1,
-            alignment: AlignmentType.CENTER,
-            spacing: { after: 400 },
-          }),
+          // Cover Page
+          ...getCoverPage(reportType, reportOptions),
           
-          // Organization Info
-          ...getOrganizationInfoParagraphs(reportOptions.contactDetails),
+          // Table of Contents
+          ...getTableOfContents(),
           
           // Executive Summary
           ...(campaignData.executiveSummary ? getExecutiveSummarySection(campaignData.executiveSummary) : []),
@@ -81,92 +90,184 @@ export const generateDocx = async (
   }
 };
 
-const getOrganizationInfoParagraphs = (contactDetails: ReportOptions['contactDetails']) => {
-  const paragraphs = [];
-  
-  paragraphs.push(
+const getCoverPage = (reportType: string, reportOptions: ReportOptions) => {
+  const elements = [
+    new Paragraph({
+      text: getReportTitle(reportType),
+      heading: HeadingLevel.HEADING_1,
+      alignment: AlignmentType.CENTER,
+      spacing: { after: 400, before: 400 },
+    }),
+    
     new Paragraph({
       children: [
         new TextRun({
-          text: contactDetails.organizationName,
+          text: reportOptions.contactDetails.organizationName,
           ...STYLES.heading2,
         }),
       ],
+      alignment: AlignmentType.CENTER,
       spacing: { after: 200 },
+    }),
+  ];
+
+  if (reportOptions.contactDetails.contactPerson) {
+    elements.push(
+      new Paragraph({
+        children: [
+          new TextRun({
+            text: reportOptions.contactDetails.contactPerson,
+            ...STYLES.normalText,
+          }),
+        ],
+        alignment: AlignmentType.CENTER,
+      })
+    );
+  }
+
+  // Add date
+  elements.push(
+    new Paragraph({
+      children: [
+        new TextRun({
+          text: new Date().toLocaleDateString('en-US', { 
+            year: 'numeric', 
+            month: 'long', 
+            day: 'numeric' 
+          }),
+          ...STYLES.normalText,
+        }),
+      ],
+      alignment: AlignmentType.CENTER,
+      spacing: { after: 400 },
+    }),
+    
+    // Page break after cover
+    new Paragraph({
+      text: "",
+      pageBreakBefore: true,
     })
   );
-  
-  if (contactDetails.contactPerson) {
-    paragraphs.push(
-      new Paragraph({
-        children: [
-          new TextRun({
-            text: contactDetails.contactPerson,
-            ...STYLES.normalText,
-          }),
-        ],
-      })
-    );
-  }
-  
-  if (contactDetails.email) {
-    paragraphs.push(
-      new Paragraph({
-        children: [
-          new TextRun({
-            text: contactDetails.email,
-            ...STYLES.normalText,
-          }),
-        ],
-      })
-    );
-  }
-  
-  if (contactDetails.phone) {
-    paragraphs.push(
-      new Paragraph({
-        children: [
-          new TextRun({
-            text: contactDetails.phone,
-            ...STYLES.normalText,
-          }),
-        ],
-      })
-    );
-  }
-  
-  if (contactDetails.website) {
-    paragraphs.push(
-      new Paragraph({
-        children: [
-          new TextRun({
-            text: contactDetails.website,
-            ...STYLES.normalText,
-          }),
-        ],
-        spacing: { after: 400 },
-      })
-    );
-  }
-  
-  return paragraphs;
+
+  return elements;
+};
+
+const getTableOfContents = () => {
+  return [
+    new Paragraph({
+      text: "Table of Contents",
+      heading: HeadingLevel.HEADING_1,
+      spacing: { after: 300 },
+    }),
+    // TOC would be populated by Word automatically
+    new Paragraph({
+      text: "",
+      pageBreakBefore: true,
+    }),
+  ];
 };
 
 const getExecutiveSummarySection = (executiveSummary: string) => {
-  return [
+  const sections = [
     new Paragraph({
       text: 'Executive Summary',
       heading: HeadingLevel.HEADING_1,
       spacing: { before: 400, after: 200 },
     }),
+  ];
+
+  // Split the executive summary into paragraphs
+  const paragraphs = executiveSummary.split('\n\n');
+  
+  paragraphs.forEach(para => {
+    if (para.trim().startsWith('|')) {
+      // This is a table
+      sections.push(...createTableFromMarkdown(para));
+    } else if (para.trim().startsWith('#')) {
+      // This is a heading
+      sections.push(
+        new Paragraph({
+          text: para.replace(/^#+\s/, ''),
+          heading: HeadingLevel.HEADING_2,
+          spacing: { before: 200, after: 100 },
+        })
+      );
+    } else {
+      // Regular paragraph
+      sections.push(
+        new Paragraph({
+          children: [
+            new TextRun({
+              text: para.trim(),
+              ...STYLES.normalText,
+            }),
+          ],
+          spacing: { after: 200 },
+        })
+      );
+    }
+  });
+
+  sections.push(
     new Paragraph({
-      children: [
-        new TextRun({
-          text: executiveSummary,
-          ...STYLES.normalText,
-        }),
-      ],
-      spacing: { after: 400 },
+      text: "",
+      pageBreakBefore: true,
+    })
+  );
+
+  return sections;
+};
+
+const createTableFromMarkdown = (tableText: string) => {
+  const rows = tableText.trim().split('\n');
+  const headers = rows[0].split('|').filter(cell => cell.trim()).map(cell => cell.trim());
+  
+  const table = new Table({
+    width: {
+      size: 100,
+      type: WidthType.PERCENTAGE,
+    },
+    borders: STYLES.tableBorders,
+    rows: [
+      new TableRow({
+        children: headers.map(header => 
+          new TableCell({
+            children: [new Paragraph({
+              children: [new TextRun({
+                text: header,
+                ...STYLES.tableHeader,
+              })],
+            })],
+            shading: {
+              fill: "2B5797",
+            },
+          })
+        ),
+      }),
+      ...rows.slice(2).map(row => 
+        new TableRow({
+          children: row.split('|')
+            .filter(cell => cell.trim())
+            .map(cell => 
+              new TableCell({
+                children: [new Paragraph({
+                  children: [new TextRun({
+                    text: cell.trim(),
+                    ...STYLES.tableCell,
+                  })],
+                })],
+              })
+            ),
+        })
+      ),
+    ],
+  });
+
+  return [
+    table,
+    new Paragraph({
+      text: "",
+      spacing: { after: 200 },
     }),
   ];
 };
@@ -182,15 +283,7 @@ const getReportContent = (campaignData: CampaignData, reportType: 'combined' | '
           heading: HeadingLevel.HEADING_1,
           spacing: { before: 400, after: 200 },
         }),
-        new Paragraph({
-          children: [
-            new TextRun({
-              text: campaignData.step1Analysis,
-              ...STYLES.normalText,
-            }),
-          ],
-          spacing: { after: 400 },
-        })
+        ...formatContentWithHeadings(campaignData.step1Analysis)
       );
     }
     
@@ -201,15 +294,7 @@ const getReportContent = (campaignData: CampaignData, reportType: 'combined' | '
           heading: HeadingLevel.HEADING_1,
           spacing: { before: 400, after: 200 },
         }),
-        new Paragraph({
-          children: [
-            new TextRun({
-              text: campaignData.messagingGuide,
-              ...STYLES.normalText,
-            }),
-          ],
-          spacing: { after: 400 },
-        })
+        ...formatContentWithHeadings(campaignData.messagingGuide)
       );
     }
   }
@@ -222,18 +307,46 @@ const getReportContent = (campaignData: CampaignData, reportType: 'combined' | '
           heading: HeadingLevel.HEADING_1,
           spacing: { before: 400, after: 200 },
         }),
-        new Paragraph({
-          children: [
-            new TextRun({
-              text: campaignData.actionPlan,
-              ...STYLES.normalText,
-            }),
-          ],
-          spacing: { after: 400 },
-        })
+        ...formatContentWithHeadings(campaignData.actionPlan)
       );
     }
   }
+  
+  return sections;
+};
+
+const formatContentWithHeadings = (content: string) => {
+  const sections = [];
+  const paragraphs = content.split('\n\n');
+  
+  paragraphs.forEach(para => {
+    if (para.trim().startsWith('|')) {
+      sections.push(...createTableFromMarkdown(para));
+    } else if (para.trim().startsWith('#')) {
+      const level = (para.match(/^#+/) || [''])[0].length;
+      sections.push(
+        new Paragraph({
+          text: para.replace(/^#+\s/, ''),
+          heading: level === 1 ? HeadingLevel.HEADING_1 : 
+                  level === 2 ? HeadingLevel.HEADING_2 : 
+                  HeadingLevel.HEADING_3,
+          spacing: { before: 200, after: 100 },
+        })
+      );
+    } else {
+      sections.push(
+        new Paragraph({
+          children: [
+            new TextRun({
+              text: para.trim(),
+              ...STYLES.normalText,
+            }),
+          ],
+          spacing: { after: 200 },
+        })
+      );
+    }
+  });
   
   return sections;
 };
