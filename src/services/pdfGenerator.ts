@@ -12,6 +12,7 @@ export const generatePdf = async (
     const doc = new jsPDF();
     let yPos = 20;
     const pageWidth = doc.internal.pageSize.width;
+    const pageHeight = doc.internal.pageSize.height;
     const margin = 20;
     const contentWidth = pageWidth - (margin * 2);
     
@@ -53,34 +54,23 @@ export const generatePdf = async (
     
     // Add executive summary if available
     if (campaignData.executiveSummary) {
-      doc.setFontSize(16);
-      doc.setTextColor(43, 87, 151);
-      doc.text('Executive Summary', margin, yPos);
-      yPos += 10;
-      
-      doc.setFontSize(12);
-      doc.setTextColor(51, 51, 51);
-      const splitSummary = doc.splitTextToSize(campaignData.executiveSummary, contentWidth);
-      doc.text(splitSummary, margin, yPos);
-      yPos += (splitSummary.length * 7) + 15;
+      yPos = addSection(doc, 'Executive Summary', campaignData.executiveSummary, margin, yPos, contentWidth, pageHeight);
     }
     
     // Add specific report content based on type
     if (reportType === 'combined' || reportType === 'messaging') {
       if (campaignData.step1Analysis) {
-        addSection(doc, 'Strategic Analysis', campaignData.step1Analysis, margin, yPos, contentWidth);
-        yPos = doc.internal.getCurrentPageInfo().pageNumber === 1 ? yPos + 40 : 20;
+        yPos = addSection(doc, 'Strategic Analysis', campaignData.step1Analysis, margin, yPos, contentWidth, pageHeight);
       }
       
       if (campaignData.messagingGuide) {
-        addSection(doc, 'Messaging Guide', campaignData.messagingGuide, margin, yPos, contentWidth);
-        yPos = doc.internal.getCurrentPageInfo().pageNumber === 1 ? yPos + 40 : 20;
+        yPos = addSection(doc, 'Messaging Guide', campaignData.messagingGuide, margin, yPos, contentWidth, pageHeight);
       }
     }
     
     if (reportType === 'combined' || reportType === 'action') {
       if (campaignData.actionPlan) {
-        addSection(doc, 'Action Plan', campaignData.actionPlan, margin, yPos, contentWidth);
+        yPos = addSection(doc, 'Action Plan', campaignData.actionPlan, margin, yPos, contentWidth, pageHeight);
       }
     }
     
@@ -101,16 +91,41 @@ const addSection = (
   content: string,
   margin: number,
   startY: number,
-  contentWidth: number
-) => {
+  contentWidth: number,
+  pageHeight: number
+): number => {
+  const lineHeight = 7;
+  const titleMargin = 10;
+  let currentY = startY;
+
+  // Check if we need a new page for the section
+  if (currentY + 30 > pageHeight - margin) {
+    doc.addPage();
+    currentY = margin;
+  }
+
+  // Add section title
   doc.setFontSize(16);
   doc.setTextColor(43, 87, 151);
-  doc.text(title, margin, startY);
-  
+  doc.text(title, margin, currentY);
+  currentY += titleMargin + lineHeight;
+
+  // Add section content
   doc.setFontSize(12);
   doc.setTextColor(51, 51, 51);
   const splitContent = doc.splitTextToSize(content, contentWidth);
-  doc.text(splitContent, margin, startY + 10);
+
+  // Calculate if we need a new page
+  for (let i = 0; i < splitContent.length; i++) {
+    if (currentY > pageHeight - margin) {
+      doc.addPage();
+      currentY = margin;
+    }
+    doc.text(splitContent[i], margin, currentY);
+    currentY += lineHeight;
+  }
+
+  return currentY + 15; // Return the new Y position with some padding
 };
 
 const getReportTitle = (reportType: 'combined' | 'messaging' | 'action'): string => {
