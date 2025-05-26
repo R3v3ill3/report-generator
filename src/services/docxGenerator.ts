@@ -61,7 +61,6 @@ export const generateDocx = async (
         );
       } catch (error) {
         console.error('Error processing logo:', error);
-        // Continue without the logo if there's an error
       }
     }
     
@@ -117,17 +116,19 @@ export const generateDocx = async (
           if (contentParts[i].trim()) {
             const paragraphs = contentParts[i].trim().split('\n\n');
             for (const paragraph of paragraphs) {
-              children.push(
-                new Paragraph({
-                  children: [
-                    new TextRun({
-                      text: paragraph.trim(),
-                      size: 24,
-                    }),
-                  ],
-                  spacing: { after: 200 },
-                })
-              );
+              if (paragraph.trim()) {
+                children.push(
+                  new Paragraph({
+                    children: [
+                      new TextRun({
+                        text: paragraph.trim(),
+                        ...STYLES.normalText,
+                      }),
+                    ],
+                    spacing: { after: 200 },
+                  })
+                );
+              }
             }
           }
         } else {
@@ -146,48 +147,8 @@ export const generateDocx = async (
       }
     }
     
-    // Create the document with proper styles
+    // Create the document
     const doc = new Document({
-      styles: {
-        paragraphStyles: [
-          {
-            id: "Heading1",
-            name: "Heading 1",
-            basedOn: "Normal",
-            next: "Normal",
-            quickFormat: true,
-            run: {
-              size: 32,
-              bold: true,
-              color: "2B5797",
-            },
-            paragraph: {
-              spacing: {
-                before: 240,
-                after: 120,
-              },
-            },
-          },
-          {
-            id: "Heading2",
-            name: "Heading 2",
-            basedOn: "Normal",
-            next: "Normal",
-            quickFormat: true,
-            run: {
-              size: 28,
-              bold: true,
-              color: "2B5797",
-            },
-            paragraph: {
-              spacing: {
-                before: 240,
-                after: 120,
-              },
-            },
-          },
-        ],
-      },
       sections: [{
         properties: {},
         children: children,
@@ -236,7 +197,7 @@ const getOrganizationInfoParagraphs = (contactDetails: ReportOptions['contactDet
         children: [
           new TextRun({
             text: contactDetails.contactPerson,
-            size: 24,
+            ...STYLES.normalText,
           }),
         ],
       })
@@ -249,7 +210,7 @@ const getOrganizationInfoParagraphs = (contactDetails: ReportOptions['contactDet
         children: [
           new TextRun({
             text: contactDetails.email,
-            size: 24,
+            ...STYLES.normalText,
           }),
         ],
       })
@@ -262,7 +223,7 @@ const getOrganizationInfoParagraphs = (contactDetails: ReportOptions['contactDet
         children: [
           new TextRun({
             text: contactDetails.phone,
-            size: 24,
+            ...STYLES.normalText,
           }),
         ],
       })
@@ -275,7 +236,7 @@ const getOrganizationInfoParagraphs = (contactDetails: ReportOptions['contactDet
         children: [
           new TextRun({
             text: contactDetails.website,
-            size: 24,
+            ...STYLES.normalText,
           }),
         ],
         spacing: { after: 400 },
