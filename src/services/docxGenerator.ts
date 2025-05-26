@@ -1,4 +1,4 @@
-import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, BorderStyle, AlignmentType, WidthType, convertInchesToTwip, TableBorders } from 'docx';
+import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, BorderStyle, AlignmentType, WidthType, convertInchesToTwip } from 'docx';
 import { CampaignData, ReportOptions } from '../contexts/CampaignContext';
 
 const STYLES = {
@@ -40,6 +40,71 @@ const STYLES = {
     left: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
     right: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
   },
+  table: {
+    cell: {
+      margins: {
+        top: convertInchesToTwip(0.1),
+        bottom: convertInchesToTwip(0.1),
+        left: convertInchesToTwip(0.1),
+        right: convertInchesToTwip(0.1),
+      },
+      borders: {
+        top: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
+        bottom: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
+        left: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
+        right: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
+      },
+    },
+    header: {
+      fill: "2B5797",
+      textColor: "FFFFFF",
+      bold: true
+    }
+  }
+};
+
+const createTable = (headers: string[], rows: string[][]) => {
+  return new Table({
+    width: {
+      size: 100,
+      type: WidthType.PERCENTAGE,
+    },
+    rows: [
+      new TableRow({
+        tableHeader: true,
+        children: headers.map(header => 
+          new TableCell({
+            children: [new Paragraph({
+              children: [new TextRun({
+                text: header,
+                bold: true,
+                color: "FFFFFF",
+              })],
+            })],
+            shading: {
+              fill: "2B5797",
+            },
+            ...STYLES.table.cell
+          })
+        ),
+      }),
+      ...rows.map(row => 
+        new TableRow({
+          children: row.map(cell => 
+            new TableCell({
+              children: [new Paragraph({
+                children: [new TextRun({
+                  text: cell,
+                  size: 20,
+                })],
+              })],
+              ...STYLES.table.cell
+            })
+          ),
+        })
+      ),
+    ],
+  });
 };
 
 export const generateDocx = async (
