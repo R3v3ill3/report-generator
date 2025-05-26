@@ -18,21 +18,26 @@ interface FormattedReport {
 }
 
 export const formatFullReport = async (campaignData: CampaignData): Promise<FormattedReport> => {
+  console.log('Formatting report for campaign data:', campaignData);
+  
   const sections: FormattedSection[] = [];
   const tables = new Map<string, TableData>();
   
   // Add executive summary if available
   if (campaignData.executiveSummary) {
+    console.log('Processing executive summary');
+    const formattedSummary = await formatSection(campaignData.executiveSummary);
     sections.push({
       title: 'Executive Summary',
-      content: await formatSection(campaignData.executiveSummary),
+      content: formattedSummary,
       level: 1
     });
   }
 
   // Add strategic analysis if available
   if (campaignData.step1Analysis) {
-    const { formattedContent, extractedTables } = await extractAndFormatTables(
+    console.log('Processing strategic analysis');
+    const { formattedContent, extractedTables } = await processContent(
       campaignData.step1Analysis,
       'analysis'
     );
@@ -49,7 +54,8 @@ export const formatFullReport = async (campaignData: CampaignData): Promise<Form
 
   // Add messaging guide if available
   if (campaignData.messagingGuide) {
-    const { formattedContent, extractedTables } = await extractAndFormatTables(
+    console.log('Processing messaging guide');
+    const { formattedContent, extractedTables } = await processContent(
       campaignData.messagingGuide,
       'messaging'
     );
@@ -65,7 +71,8 @@ export const formatFullReport = async (campaignData: CampaignData): Promise<Form
 
   // Add action plan if available
   if (campaignData.actionPlan) {
-    const { formattedContent, extractedTables } = await extractAndFormatTables(
+    console.log('Processing action plan');
+    const { formattedContent, extractedTables } = await processContent(
       campaignData.actionPlan,
       'action'
     );
@@ -79,15 +86,27 @@ export const formatFullReport = async (campaignData: CampaignData): Promise<Form
     extractedTables.forEach((table, key) => tables.set(key, table));
   }
 
+  console.log('Formatted sections:', sections);
+  console.log('Extracted tables:', tables);
+
   return {
-    title: campaignData.summary?.purpose || 'Campaign Report',
+    title: getReportTitle(campaignData),
     sections,
     tables
   };
 };
 
+const getReportTitle = (campaignData: CampaignData): string => {
+  if (campaignData.summary?.purpose) {
+    return `Campaign Report: ${campaignData.summary.purpose}`;
+  }
+  return 'Campaign Report';
+};
+
 const formatSection = async (content: string): Promise<string> => {
-  // Remove any existing markdown formatting
+  if (!content) return '';
+  
+  // Remove any existing markdown formatting while preserving content structure
   let formatted = content
     .replace(/#{1,6}\s/g, '') // Remove heading markers
     .replace(/\*\*/g, '')     // Remove bold markers
@@ -96,78 +115,113 @@ const formatSection = async (content: string): Promise<string> => {
 
   // Split into paragraphs and format each
   const paragraphs = formatted.split('\n\n');
-  const formattedParagraphs = paragraphs.map(p => p.trim()).filter(p => p.length > 0);
+  const formattedParagraphs = paragraphs
+    .map(p => p.trim())
+    .filter(p => p.length > 0);
 
   return formattedParagraphs.join('\n\n');
 };
 
-const extractAndFormatTables = async (
+const processContent = async (
   content: string,
   sectionPrefix: string
 ): Promise<{ formattedContent: string; extractedTables: Map<string, TableData> }> => {
+  if (!content) {
+    return { formattedContent: '', extractedTables: new Map() };
+  }
+
   const tables = new Map<string, TableData>();
   let tableCounter = 1;
   let formattedContent = '';
   let currentTable: TableData | null = null;
-  let isCollectingTable = false;
+  let tableLines: string[] = [];
   
   // Split content into lines
   const lines = content.split('\n');
+  let currentParagraph = '';
   
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
     
     if (line.startsWith('|')) {
-      if (!isCollectingTable) {
-        // Start new table
-        isCollectingTable = true;
-        currentTable = {
-          headers: [],
-          rows: []
-        };
-        
-        // Extract headers
-        const headerCells = line.split('|')
-          .filter(cell => cell.trim())
-          .map(cell => cell.trim());
-        
-        currentTable.headers = headerCells;
-      } else if (!line.includes('|-')) { // Skip separator row
-        // Add table row
-        const rowCells = line.split('|')
-          .filter(cell => cell.trim())
-          .map(cell => cell.trim());
-        
-        if (currentTable) {
-          currentTable.rows.push(rowCells);
-        }
-      }
-    } else if (isCollectingTable) {
-      // End of table reached
-      isCollectingTable = false;
-      if (currentTable) {
-        const tableId = `${sectionPrefix}_table_${tableCounter++}`;
-        tables.set(tableId, currentTable);
-        formattedContent += `\n[TABLE:${tableId}]\n\n`;
+      // If we have any pending paragraph content, add it
+      if (currentParagraph) {
+        formattedContent += currentParagraph.trim() + '\n\n';
+        currentParagraph = '';
       }
       
-      if (line) {
-        formattedContent += await formatSection(line) + '\n\n';
+      tableLines.push(line);
+      
+      // If next line doesn't start with |, process the table
+      if (!lines[i + 1]?.trim().startsWith('|')) {
+        const table = processTable(tableLines);
+        if (table) {
+          const tableId = `${sectionPrefix}_table_${tableCounter++}`;
+          tables.set(tableId, table);
+          formattedContent += `[TABLE:${tableId}]\n\n`;
+        }
+        tableLines = [];
       }
-    } else if (line) {
-      formattedContent += await formatSection(line) + '\n\n';
+    } else {
+      // If we were collecting table lines, process the table
+      if (tableLines.length > 0) {
+        const table = processTable(tableLines);
+        if (table) {
+          const tableId = `${sectionPrefix}_table_${tableCounter++}`;
+          tables.set(tableId, table);
+          formattedContent += `[TABLE:${tableId}]\n\n`;
+        }
+        tableLines = [];
+      }
+      
+      // Handle regular content
+      if (line) {
+        currentParagraph += (currentParagraph ? ' ' : '') + line;
+      } else if (currentParagraph) {
+        formattedContent += currentParagraph.trim() + '\n\n';
+        currentParagraph = '';
+      }
     }
   }
   
-  // Handle case where file ends with a table
-  if (isCollectingTable && currentTable) {
-    const tableId = `${sectionPrefix}_table_${tableCounter}`;
-    tables.set(tableId, currentTable);
-    formattedContent += `\n[TABLE:${tableId}]\n\n`;
+  // Handle any remaining content
+  if (currentParagraph) {
+    formattedContent += currentParagraph.trim() + '\n\n';
+  }
+  
+  if (tableLines.length > 0) {
+    const table = processTable(tableLines);
+    if (table) {
+      const tableId = `${sectionPrefix}_table_${tableCounter}`;
+      tables.set(tableId, table);
+      formattedContent += `[TABLE:${tableId}]\n\n`;
+    }
   }
   
   return {
     formattedContent: formattedContent.trim(),
     extractedTables: tables
   };
+};
+
+const processTable = (tableLines: string[]): TableData | null => {
+  if (tableLines.length < 3) return null; // Need at least header, separator, and one data row
+  
+  const headers = tableLines[0]
+    .split('|')
+    .filter(cell => cell.trim())
+    .map(cell => cell.trim());
+  
+  const rows = tableLines.slice(2) // Skip header and separator
+    .filter(line => line.includes('|'))
+    .map(line => 
+      line
+        .split('|')
+        .filter(cell => cell.trim())
+        .map(cell => cell.trim())
+    );
+  
+  if (headers.length === 0 || rows.length === 0) return null;
+  
+  return { headers, rows };
 };
