@@ -10,26 +10,23 @@ const FORMATTING_PROMPT = `
 Format this business report content with proper structure and formatting.
 
 REQUIREMENTS:
-1. Use proper heading levels (no markdown symbols)
-2. Format tables with clear columns and aligned data
+1. Preserve table structure using tab-separated columns
+2. Format headings with proper hierarchy (no symbols)
 3. Use proper paragraph breaks and spacing
 4. Maintain all original content and meaning
 5. Use professional business language
 
-DO NOT:
-- Use any markdown symbols (**, ##, etc.)
-- Use vertical bars (|) for tables
-- Add or remove any content
-- Change the meaning of any content
-
 For tables, format like this:
-Week    Day    Activity    Details
-1       Mon    Planning    Initial setup
-2       Tue    Review     Team meeting
+Week\tDay\tActivity\tDetails
+1\tMon\tPlanning\tInitial setup
+2\tTue\tReview\tTeam meeting
 
-For headings, use proper capitalization and no symbols:
+For headings, use proper capitalization and no symbols, with one blank line before and after:
+
 Main Heading
+
   Subheading
+
     Section Title
 
 Input content:`;
@@ -68,7 +65,7 @@ const formatContent = async (content: string): Promise<string> => {
       messages: [
         {
           role: "system",
-          content: "You are a professional document formatter. Format the content according to the requirements while preserving all information and meaning."
+          content: "You are a professional document formatter specializing in business reports. Format the content according to the requirements while preserving all information, meaning, and especially table structures. Use tabs to separate table columns."
         },
         {
           role: "user",
@@ -85,9 +82,57 @@ const formatContent = async (content: string): Promise<string> => {
       throw new Error('No formatted content received from OpenAI');
     }
 
-    return formattedContent.trim();
+    // Post-process the content to ensure proper table structure
+    return postProcessContent(formattedContent.trim());
   } catch (error) {
     console.error('Error formatting content:', error);
     return content;
   }
+};
+
+const postProcessContent = (content: string): string => {
+  // Split content into lines
+  const lines = content.split('\n');
+  const processedLines = [];
+  let inTable = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    
+    // Detect table start (line contains tabs)
+    if (line.includes('\t')) {
+      inTable = true;
+      // Ensure consistent table formatting
+      processedLines.push(line.split('\t').join('\t'));
+    } else {
+      if (inTable) {
+        // Add extra line break after table
+        processedLines.push('');
+        inTable = false;
+      }
+      
+      // Handle headings and paragraphs
+      if (line.length > 0) {
+        // Add extra line break before headings
+        if (isHeading(line) && processedLines.length > 0) {
+          processedLines.push('');
+        }
+        processedLines.push(line);
+      } else {
+        // Preserve single line breaks
+        processedLines.push('');
+      }
+    }
+  }
+
+  return processedLines.join('\n');
+};
+
+const isHeading = (line: string): boolean => {
+  // Simple heuristic: headings are typically shorter and don't end with punctuation
+  return line.length < 100 && 
+         !line.endsWith('.') && 
+         !line.endsWith('?') && 
+         !line.endsWith('!') &&
+         line.split(' ').length < 10;
 };
