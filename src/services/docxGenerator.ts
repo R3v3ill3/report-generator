@@ -35,22 +35,34 @@ export const generateDocx = async (
     
     // Add logo if available
     if (reportOptions.logoDataUrl) {
-      const base64Data = reportOptions.logoDataUrl.split(',')[1];
-      children.push(
-        new Paragraph({
-          children: [
-            new ImageRun({
-              data: Buffer.from(base64Data, 'base64'),
-              transformation: {
-                width: 200,
-                height: 100,
-              },
-            }),
-          ],
-          alignment: AlignmentType.CENTER,
-          spacing: { after: 400 },
-        })
-      );
+      try {
+        // Convert base64 to Uint8Array for browser environment
+        const base64Data = reportOptions.logoDataUrl.split(',')[1];
+        const binaryString = window.atob(base64Data);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+        
+        children.push(
+          new Paragraph({
+            children: [
+              new ImageRun({
+                data: bytes,
+                transformation: {
+                  width: 200,
+                  height: 100,
+                },
+              }),
+            ],
+            alignment: AlignmentType.CENTER,
+            spacing: { after: 400 },
+          })
+        );
+      } catch (error) {
+        console.error('Error processing logo:', error);
+        // Continue without the logo if there's an error
+      }
     }
     
     // Add title
