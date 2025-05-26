@@ -17,22 +17,19 @@ export const generatePdf = async (
     const margin = 20;
     const contentWidth = pageWidth - (margin * 2);
     
-    // Add logo if available
     if (reportOptions.logoDataUrl) {
       doc.addImage(reportOptions.logoDataUrl, 'PNG', margin, yPos, 40, 20);
       yPos += 30;
     }
     
-    // Add title
     doc.setFontSize(24);
-    doc.setTextColor(43, 87, 151); // Blue color
+    doc.setTextColor(43, 87, 151);
     const title = getReportTitle(reportType);
     doc.text(title, pageWidth / 2, yPos, { align: 'center' });
     yPos += 20;
     
-    // Add organization info
     doc.setFontSize(12);
-    doc.setTextColor(51, 51, 51); // Dark gray
+    doc.setTextColor(51, 51, 51);
     const { contactDetails } = reportOptions;
     doc.text(contactDetails.organizationName, margin, yPos);
     yPos += 7;
@@ -53,18 +50,15 @@ export const generatePdf = async (
       yPos += 15;
     }
 
-    // Initialize table of contents
     const tocStartY = yPos;
     doc.setFontSize(16);
     doc.setTextColor(43, 87, 151);
     doc.text('Table of Contents', margin, yPos);
     yPos += 10;
 
-    // Store sections and their page numbers
     const sections: { title: string; page: number }[] = [];
     let currentPage = 1;
 
-    // Add sections based on report type
     if (campaignData.executiveSummary) {
       sections.push({ title: 'Executive Summary', page: currentPage });
       yPos = addFormattedSection(doc, 'Executive Summary', campaignData.executiveSummary, margin, yPos, contentWidth, pageHeight);
@@ -92,7 +86,6 @@ export const generatePdf = async (
       }
     }
 
-    // Go back to first page and add TOC
     doc.setPage(1);
     yPos = tocStartY + 15;
     doc.setFontSize(12);
@@ -104,7 +97,6 @@ export const generatePdf = async (
       yPos += 7;
     });
     
-    // Save the PDF
     const filename = getReportFilename(campaignData, reportType);
     doc.save(filename);
     
@@ -128,19 +120,16 @@ const addFormattedSection = (
   const lineHeight = 7;
   const titleMargin = 10;
 
-  // Check if we need a new page for the section
   if (currentY + 30 > pageHeight - margin) {
     doc.addPage();
     currentY = margin;
   }
 
-  // Add section title
-  doc.setFontSize(16);
+  doc.setFontSize(18);
   doc.setTextColor(43, 87, 151);
   doc.text(title, margin, currentY);
   currentY += titleMargin + lineHeight;
 
-  // Process content
   const lines = content.split('\n');
   let inTable = false;
   let tableData: string[][] = [];
@@ -148,7 +137,6 @@ const addFormattedSection = (
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
 
-    // Handle table lines
     if (line.startsWith('|') && line.endsWith('|')) {
       if (!inTable) {
         inTable = true;
@@ -161,15 +149,12 @@ const addFormattedSection = (
       continue;
     }
 
-    // Handle end of table
     if (inTable && (!line.startsWith('|') || !line.endsWith('|'))) {
       inTable = false;
       if (tableData.length > 0) {
-        // Remove separator row if present
         const cleanTableData = tableData.filter(row => !row.every(cell => /^[-:]+$/.test(cell)));
         
-        // Add table using jspdf-autotable
-        doc.autoTable({
+        (doc as any).autoTable({
           startY: currentY,
           head: [cleanTableData[0]],
           body: cleanTableData.slice(1),
@@ -184,6 +169,9 @@ const addFormattedSection = (
             textColor: 255,
             fontStyle: 'bold',
           },
+          alternateRowStyles: {
+            fillColor: [245, 247, 250],
+          },
         });
         
         currentY = (doc as any).lastAutoTable.finalY + 10;
@@ -191,7 +179,6 @@ const addFormattedSection = (
       }
     }
 
-    // Handle headings
     if (line.match(/^#{1,6}\s/)) {
       const level = line.match(/^(#{1,6})\s/)?.[1].length || 1;
       const text = line.replace(/^#{1,6}\s/, '');
@@ -201,32 +188,42 @@ const addFormattedSection = (
         currentY = margin;
       }
       
-      doc.setFontSize(18 - (level * 2));
+      const fontSize = 18 - (level * 2);
+      doc.setFontSize(fontSize);
       doc.setTextColor(43, 87, 151);
       doc.text(text, margin, currentY);
       currentY += lineHeight + 5;
       continue;
     }
 
-    // Handle regular paragraphs
     if (line !== '' && !inTable) {
       if (currentY + lineHeight > pageHeight - margin) {
         doc.addPage();
         currentY = margin;
       }
       
-      doc.setFontSize(12);
-      doc.setTextColor(51, 51, 51);
-      const splitText = doc.splitTextToSize(line, contentWidth);
-      doc.text(splitText, margin, currentY);
-      currentY += (splitText.length * lineHeight) + 3;
+      if (line.startsWith('**') && line.endsWith('**')) {
+        doc.setFontSize(12);
+        doc.setTextColor(51, 51, 51);
+        const boldText = line.slice(2, -2);
+        doc.setFont(undefined, 'bold');
+        const splitText = doc.splitTextToSize(boldText, contentWidth);
+        doc.text(splitText, margin, currentY);
+        doc.setFont(undefined, 'normal');
+        currentY += (splitText.length * lineHeight) + 3;
+      } else {
+        doc.setFontSize(12);
+        doc.setTextColor(51, 51, 51);
+        const splitText = doc.splitTextToSize(line, contentWidth);
+        doc.text(splitText, margin, currentY);
+        currentY += (splitText.length * lineHeight) + 3;
+      }
     }
   }
 
-  // Handle any remaining table
   if (tableData.length > 0) {
     const cleanTableData = tableData.filter(row => !row.every(cell => /^[-:]+$/.test(cell)));
-    doc.autoTable({
+    (doc as any).autoTable({
       startY: currentY,
       head: [cleanTableData[0]],
       body: cleanTableData.slice(1),
@@ -240,6 +237,9 @@ const addFormattedSection = (
         fillColor: [43, 87, 151],
         textColor: 255,
         fontStyle: 'bold',
+      },
+      alternateRowStyles: {
+        fillColor: [245, 247, 250],
       },
     });
     currentY = (doc as any).lastAutoTable.finalY + 10;

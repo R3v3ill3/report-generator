@@ -1,4 +1,4 @@
-import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, BorderStyle, AlignmentType, TableOfContents, convertInchesToTwip } from 'docx';
+import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, BorderStyle, AlignmentType, TableOfContents, convertInchesToTwip, ShadingType } from 'docx';
 import { CampaignData, ReportOptions } from '../contexts/CampaignContext';
 
 const STYLES = {
@@ -8,17 +8,31 @@ const STYLES = {
     color: "2B5797",
   },
   heading2: {
-    size: 28,
+    size: 26,
     bold: true,
     color: "2B5797",
   },
   heading3: {
-    size: 24,
+    size: 22,
+    bold: true,
+    color: "2B5797",
+  },
+  heading4: {
+    size: 20,
     bold: true,
     color: "2B5797",
   },
   normalText: {
-    size: 24,
+    size: 22,
+    color: "333333",
+  },
+  tableHeader: {
+    size: 20,
+    bold: true,
+    color: "FFFFFF",
+  },
+  tableCell: {
+    size: 20,
     color: "333333",
   },
   table: {
@@ -42,7 +56,6 @@ export const generateDocx = async (
     console.log(`Generating ${reportType} DOCX report for campaign:`, campaignData.id);
     
     const children = [
-      // Title
       new Paragraph({
         text: getReportTitle(reportType),
         heading: HeadingLevel.HEADING_1,
@@ -50,10 +63,8 @@ export const generateDocx = async (
         spacing: { after: 400 },
       }),
       
-      // Organization Info
       ...getOrganizationInfoParagraphs(reportOptions.contactDetails),
       
-      // Table of Contents
       new Paragraph({
         text: "Table of Contents",
         heading: HeadingLevel.HEADING_1,
@@ -61,11 +72,12 @@ export const generateDocx = async (
       }),
       new TableOfContents("Table of Contents", {
         hyperlink: true,
-        headingStyleRange: "1-3",
+        headingStyleRange: "1-4",
         stylesWithLevels: [
           { level: 0, styleId: "Heading1" },
           { level: 1, styleId: "Heading2" },
           { level: 2, styleId: "Heading3" },
+          { level: 3, styleId: "Heading4" },
         ],
       }),
       new Paragraph({
@@ -73,12 +85,10 @@ export const generateDocx = async (
       }),
     ];
     
-    // Executive Summary
     if (campaignData.executiveSummary) {
       children.push(...parseAndFormatSection('Executive Summary', campaignData.executiveSummary));
     }
     
-    // Report Content
     if (reportType === 'combined' || reportType === 'messaging') {
       if (campaignData.step1Analysis) {
         children.push(...parseAndFormatSection('Strategic Analysis', campaignData.step1Analysis));
@@ -101,11 +111,9 @@ export const generateDocx = async (
       }],
     });
     
-    // Generate and save the document
     const buffer = await Packer.toBlob(doc);
     const filename = getReportFilename(campaignData, reportType);
     
-    // Create download link
     const url = window.URL.createObjectURL(buffer);
     const link = document.createElement('a');
     link.href = url;
@@ -128,7 +136,6 @@ const parseAndFormatSection = (title: string, content: string): (Paragraph | Tab
   let currentTable: string[][] = [];
   let inTable = false;
   
-  // Add section title
   elements.push(
     new Paragraph({
       text: title,
@@ -140,13 +147,11 @@ const parseAndFormatSection = (title: string, content: string): (Paragraph | Tab
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
     
-    // Handle table lines
     if (line.startsWith('|') && line.endsWith('|')) {
       if (!inTable) {
         inTable = true;
         currentTable = [];
       }
-      // Process table row
       const cells = line.slice(1, -1).split('|').map(cell => cell.trim());
       if (cells.length > 0) {
         currentTable.push(cells);
@@ -154,7 +159,6 @@ const parseAndFormatSection = (title: string, content: string): (Paragraph | Tab
       continue;
     }
     
-    // Handle end of table
     if (inTable && (!line.startsWith('|') || !line.endsWith('|'))) {
       inTable = false;
       if (currentTable.length > 0) {
@@ -163,22 +167,23 @@ const parseAndFormatSection = (title: string, content: string): (Paragraph | Tab
       }
     }
     
-    // Handle headings
     if (line.match(/^#{1,6}\s/)) {
       const level = line.match(/^(#{1,6})\s/)?.[1].length || 1;
       const text = line.replace(/^#{1,6}\s/, '');
+      
       elements.push(
         new Paragraph({
           text,
           heading: level as HeadingLevel,
           spacing: { before: 300, after: 150 },
+          style: `heading${level}`,
+          ...getHeadingStyle(level),
         })
       );
       continue;
     }
     
-    // Handle regular paragraphs
-    if (line !== '') {
+    if (line !== '' && !line.startsWith('**') && !line.endsWith('**')) {
       elements.push(
         new Paragraph({
           children: [
@@ -190,10 +195,24 @@ const parseAndFormatSection = (title: string, content: string): (Paragraph | Tab
           spacing: { after: 200 },
         })
       );
+    } else if (line.startsWith('**') && line.endsWith('**')) {
+      // Handle bold text without showing asterisks
+      const text = line.slice(2, -2);
+      elements.push(
+        new Paragraph({
+          children: [
+            new TextRun({
+              text,
+              bold: true,
+              ...STYLES.normalText,
+            }),
+          ],
+          spacing: { after: 200 },
+        })
+      );
     }
   }
   
-  // Handle any remaining table
   if (currentTable.length > 0) {
     elements.push(createTable(currentTable));
   }
@@ -201,16 +220,38 @@ const parseAndFormatSection = (title: string, content: string): (Paragraph | Tab
   return elements;
 };
 
+const getHeadingStyle = (level: number) => {
+  switch (level) {
+    case 1:
+      return STYLES.heading1;
+    case 2:
+      return STYLES.heading2;
+    case 3:
+      return STYLES.heading3;
+    default:
+      return STYLES.heading4;
+  }
+};
+
 const createTable = (tableData: string[][]): Table => {
-  // Remove separator row if present
   const rows = tableData.filter(row => !row.every(cell => /^[-:]+$/.test(cell)));
+  let rowIndex = 0;
   
   return new Table({
     width: {
       size: 100,
       type: "pct",
     },
-    rows: rows.map((rowData, rowIndex) => {
+    borders: {
+      top: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
+      bottom: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
+      left: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
+      right: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
+    },
+    rows: rows.map((rowData) => {
+      const isHeader = rowIndex === 0;
+      rowIndex++;
+      
       return new TableRow({
         children: rowData.map(cellText => {
           return new TableCell({
@@ -219,12 +260,15 @@ const createTable = (tableData: string[][]): Table => {
                 children: [
                   new TextRun({
                     text: cellText,
-                    bold: rowIndex === 0, // Bold headers
-                    ...STYLES.normalText,
+                    ...isHeader ? STYLES.tableHeader : STYLES.tableCell,
                   }),
                 ],
               }),
             ],
+            shading: isHeader ? {
+              type: ShadingType.CLEAR,
+              fill: "2B5797",
+            } : undefined,
           });
         }),
       });
